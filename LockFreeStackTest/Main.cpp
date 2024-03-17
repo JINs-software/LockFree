@@ -4,8 +4,8 @@
 #include <thread>
 using namespace std;
 
-#define NUM_OF_WORKER_THREAD 4
-#define NUM_OF_PUSH_PER_THREAD 1000
+#define NUM_OF_WORKER_THREAD 8
+#define NUM_OF_PUSH_PER_THREAD 10000
 
 LockFreeStack<int> g_LFS;
 vector<thread> workerThreads(NUM_OF_WORKER_THREAD);
@@ -13,12 +13,12 @@ vector<thread> workerThreads(NUM_OF_WORKER_THREAD);
 void WorkerThreadJob() {
 	for (int i = 0; i < NUM_OF_PUSH_PER_THREAD; i++) {
 		g_LFS.Push(i);
-	}
 
-	//for (int i = 0; i < NUM_OF_PUSH_PER_THREAD; i++) {
-	//	int out;
-	//	g_LFS.Pop(out);
-	//}
+		int out;
+		if (!g_LFS.Pop(out)) {
+			__debugbreak();
+		}
+	}
 }
 
 int main() {
@@ -34,8 +34,5 @@ int main() {
 		}
 	}
 
-	int cnt = 0;
-	int out;
-	while (g_LFS.Pop(out)) { cnt++; }
-	cout << cnt << endl;
+	cout << "LFS Size: " << g_LFS.GetSize() << endl;
 }
