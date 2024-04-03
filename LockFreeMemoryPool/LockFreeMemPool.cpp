@@ -273,6 +273,47 @@ void* LockFreeMemPool::Alloc()
 
 	return ret;
 }
+#elif defined(ABOID_ABA_PROBLEM_IMPROVED)
+void* LockFreeMemPool::Alloc()
+{
+	void* ret = NULL;
+
+#if defined(THREAD_SAFE)
+	UINT_PTR increment = InterlockedIncrement16(&m_Increment);
+	increment <<= (64 - 16);
+
+	PBYTE freeFront;
+	PBYTE nextFreeFront;
+	do {
+		freeFront = m_FreeFront;
+		nextFreeFront = (PBYTE)((UINT_PTR)freeFront & mask) + m_UnitSize;
+	} while (((UINT_PTR)freeFront & mask) && freeFront != (ret = InterlockedCompareExchangePointer((PVOID*)&m_FreeFront, (PVOID)((*(PUINT_PTR)nextFreeFront) ^ increment), freeFront)));
+
+#else
+	if (m_FreeFront != NULL) {
+		ret = m_FreeFront;
+		m_FreeFront = (PBYTE)(*(PUINT_PTR)(m_FreeFront + m_UnitSize));
+	}
+#endif
+
+	bool ismalloc = false;
+	if (((UINT_PTR)freeFront & mask) == NULL) {
+		ret = malloc(m_UnitSize + sizeof(UINT_PTR));
+
+		if (ret == NULL) {
+			DebugBreak();
+		}
+
+		//ret = malloc(m_UnitSize + sizeof(UINT_PTR));
+		memset(ret, 0xFDFDFDFD, m_UnitSize + sizeof(UINT_PTR));
+		ismalloc = true;
+	}
+	else {
+		ret = (void*)((UINT_PTR)ret & mask);
+	}
+
+	return ret;
+}
 #elif defined(DATA_VALID_TEST)
 void* LockFreeMemPool::Alloc()
 {
@@ -452,16 +493,10 @@ void LockFreeMemPool::Free(void* address)
 	DWORD threadID = GetThreadId(GetCurrentThread());
 	if (address != NULL) {
 		UINT_PTR increment = InterlockedIncrement16(&m_Increment);
-		//if (increment == 0x00FF || increment == 0x0FFF || increment == 0xFFFF || increment == 0) {
-		//	DebugBreak();
-		//}
-		//if (increment == 0) {
-		//	std::cout << "increment loop" << std::endl;
-		//}
 		increment <<= (64 - 16);
 
 		PBYTE ptr = (PBYTE)address;
-		memset(address, 0xFDFDFDFD, m_UnitSize + +sizeof(UINT_PTR));
+		memset(address, 0xFDFDFDFD, m_UnitSize + sizeof(UINT_PTR));
 		ptr += m_UnitSize;
 #if defined(THREAD_SAFE)
 		PBYTE freeFront;
@@ -487,6 +522,29 @@ void LockFreeMemPool::Free(void* address)
 		InterlockedExchange(&g_SpinLockFlag, 0);
 		/////////////////////////////////////////////////////
 #endif
+#else
+		* (PUINT_PTR)ptr = (UINT_PTR)m_FreeFront;
+		m_FreeFront = (PBYTE)address;
+#endif
+	}
+}
+#elif defined(ABOID_ABA_PROBLEM_IMPROVED)
+void LockFreeMemPool::Free(void* address)
+{
+	if (address != NULL) {
+		UINT_PTR increment = InterlockedIncrement16(&m_Increment);
+		increment <<= (64 - 16);
+
+		PBYTE ptr = (PBYTE)address;
+		memset(address, 0xFDFDFDFD, m_UnitSize + sizeof(UINT_PTR));
+		ptr += m_UnitSize;
+#if defined(THREAD_SAFE)
+		PBYTE freeFront;
+		do {
+			freeFront = m_FreeFront;						// 현재 바라보고 있는 freeFront (비트 식별자 포함)
+			*(PUINT_PTR)ptr = (UINT_PTR)freeFront & mask;	// 현재 바라보고 있는 freeFront의 next
+		} while (freeFront != InterlockedCompareExchangePointer((PVOID*)&m_FreeFront, (PVOID)((UINT_PTR)address ^ increment), freeFront));
+
 #else
 		* (PUINT_PTR)ptr = (UINT_PTR)m_FreeFront;
 		m_FreeFront = (PBYTE)address;

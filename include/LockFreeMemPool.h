@@ -10,8 +10,9 @@
 #include <iostream>
 
 //#define DATA_VALID_TEST
-#define SIMPLE_MEM_POOL
+//#define SIMPLE_MEM_POOL
 #define THREAD_SAFE
+#define ABOID_ABA_PROBLEM_IMPROVED
 
 struct stLog {
 	//LARGE_INTEGER highQualityTime;
@@ -37,8 +38,8 @@ public:
 	LockFreeMemPool(size_t unitSize, size_t unitCnt);
 	~LockFreeMemPool();
 
-	void* Alloc();
-	void Free(void* address);
+	void* Alloc();				// stack pop
+	void Free(void* address);	// stack push
 
 private:
 	PBYTE m_FreeFront;
