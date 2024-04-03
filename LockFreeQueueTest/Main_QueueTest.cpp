@@ -113,6 +113,7 @@ int main() {
 		std::cout << "Test.." << std::endl;
 		std::cout << "cmpNum: " << cmpNum << std::endl;
 
+		DATA_VALIDATE_TEST_VECTOR.clear();
 		g_LFQ.ClearLog();
 	}
 }

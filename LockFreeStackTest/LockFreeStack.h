@@ -10,7 +10,8 @@
 #include "LockFreeMemPool.h"
 #pragma comment(lib, "LockFreeMemoryPool")
 
-#define AVOID_ABA_PROBLEM
+//#define AVOID_ABA_PROBLEM
+#define AVOID_ABA_PROBLEM_IMPROVED
 #define LOCK_FREE_MEM_POOL
 #define NUM_OF_DEFAULT_UNITS 0
 
@@ -26,14 +27,10 @@ class LockFreeStack
 
 private:
 	Node* m_Head;
-#if defined(AVOID_ABA_PROBLEM)
+#if defined(AVOID_ABA_PROBLEM) || defined(AVOID_ABA_PROBLEM_IMPROVED)
 	short m_Increment;
-	//const BYTE m_ControlBit = 16;
-	//const unsigned long long mask = 0x0000'FFFF'FFFF'FFFF;
-	const BYTE m_ControlBit = 8;
-	const unsigned long long mask = 0x00FF'FFFF'FFFF'FFFF;
-	//const BYTE m_ControlBit = 4;
-	//const unsigned long long mask = 0x0FFF'FFFF'FFFF'FFFF;
+	const BYTE m_ControlBit = 16;
+	const unsigned long long mask = 0x0000'FFFF'FFFF'FFFF;
 #endif
 
 #if defined(LOCK_FREE_MEM_POOL)
@@ -41,7 +38,7 @@ private:
 #endif
 
 public:
-#if defined(LOCK_FREE_MEM_POOL) && defined(AVOID_ABA_PROBLEM)
+#if defined(LOCK_FREE_MEM_POOL) && (defined(AVOID_ABA_PROBLEM) || defined(AVOID_ABA_PROBLEM_IMPROVED))
 	LockFreeStack(size_t capacity = NUM_OF_DEFAULT_UNITS)
 		: m_Head(NULL), m_Increment(0), m_MemPool(sizeof(Node), capacity) 
 	{
@@ -121,12 +118,44 @@ inline void LockFreeStack<T>::Push(const T& data)
 	}
 #endif	
 
+	// BEFORE COMMIT
 #if defined(AVOID_ABA_PROBLEM)
 	UINT_PTR incrementPart = InterlockedIncrement16(&m_Increment);	// 64 = 16
 	incrementPart <<= (64 - m_ControlBit);
 	UINT_PTR managedPtr = ((UINT_PTR)newNode ^ incrementPart);
-#endif
 
+	Node* oldNode;
+	do {
+		oldNode = m_Head;
+		newNode->next = oldNode;
+		///////////////////////// LOG ///////////////////////// 
+		unsigned short logIdx = InterlockedIncrement16((SHORT*)&m_LogIndex);
+		m_LogArr[logIdx].threadID = thID;
+		m_LogArr[logIdx].isPush = true;					// Push
+		m_LogArr[logIdx].isCommit = false;              // before push commit
+		m_LogArr[logIdx].ptr0 = (UINT_PTR)oldNode;      // 현재 바라보고 있는 head
+		m_LogArr[logIdx].ptr1 = (UINT_PTR)managedPtr;   // Push 예정 노드 주소
+		///////////////////////////////////////////////////////
+	} while (oldNode != InterlockedCompareExchangePointer((PVOID*)&m_Head, (PVOID)managedPtr, (PVOID)oldNode));
+#elif defined(AVOID_ABA_PROBLEM_IMPROVED)
+	UINT_PTR incrementPart = InterlockedIncrement16(&m_Increment);	// 64 = 16
+	incrementPart <<= (64 - m_ControlBit);
+	UINT_PTR managedPtr = ((UINT_PTR)newNode ^ incrementPart);
+
+	Node* oldNode;
+	do {
+		oldNode = m_Head;
+		newNode->next = (Node*)((UINT_PTR)oldNode & mask);
+		///////////////////////// LOG ///////////////////////// 
+		unsigned short logIdx = InterlockedIncrement16((SHORT*)&m_LogIndex);
+		m_LogArr[logIdx].threadID = thID;
+		m_LogArr[logIdx].isPush = true;					// Push
+		m_LogArr[logIdx].isCommit = false;              // before push commit
+		m_LogArr[logIdx].ptr0 = (UINT_PTR)oldNode;      // 현재 바라보고 있는 head
+		m_LogArr[logIdx].ptr1 = (UINT_PTR)managedPtr;   // Push 예정 노드 주소
+		///////////////////////////////////////////////////////
+	} while (oldNode != InterlockedCompareExchangePointer((PVOID*)&m_Head, (PVOID)managedPtr, (PVOID)oldNode));
+#else
 	Node* oldNode;
 
 	do {
@@ -139,14 +168,13 @@ inline void LockFreeStack<T>::Push(const T& data)
 		m_LogArr[logIdx].isPush = true;					// Push
 		m_LogArr[logIdx].isCommit = false;              // before push commit
 		m_LogArr[logIdx].ptr0 = (UINT_PTR)oldNode;      // 현재 바라보고 있는 head
-		m_LogArr[logIdx].ptr1 = (UINT_PTR)managedPtr;   // Push 예정 노드 주소
+		m_LogArr[logIdx].ptr1 = (UINT_PTR)newNode;   // Push 예정 노드 주소
 		///////////////////////////////////////////////////////
-#if defined(AVOID_ABA_PROBLEM)
-	} while (oldNode != InterlockedCompareExchangePointer((PVOID*)&m_Head, (PVOID)managedPtr, (PVOID)oldNode));
-#else
 	} while (oldNode != InterlockedCompareExchangePointer((PVOID*)&m_Head, (PVOID)newNode, (PVOID)oldNode));
 #endif
 
+	// AFTER COMMIT
+#if defined(AVOID_ABA_PROBLEM)
 	///////////////////////// LOG ///////////////////////// 
 	unsigned short logIdx = InterlockedIncrement16((SHORT*)&m_LogIndex);
 	m_LogArr[logIdx].threadID = thID;
@@ -155,6 +183,25 @@ inline void LockFreeStack<T>::Push(const T& data)
 	m_LogArr[logIdx].ptr0 = (UINT_PTR)oldNode;      // 현재 바라보고 있던 head
 	m_LogArr[logIdx].ptr1 = (UINT_PTR)managedPtr;   // Push된 노드 주소
 	///////////////////////////////////////////////////////
+#elif defined(AVOID_ABA_PROBLEM_IMPROVED)
+	///////////////////////// LOG ///////////////////////// 
+	unsigned short logIdx = InterlockedIncrement16((SHORT*)&m_LogIndex);
+	m_LogArr[logIdx].threadID = thID;
+	m_LogArr[logIdx].isPush = true;					// Push
+	m_LogArr[logIdx].isCommit = true;				// after push commit
+	m_LogArr[logIdx].ptr0 = (UINT_PTR)oldNode;      // 현재 바라보고 있던 head
+	m_LogArr[logIdx].ptr1 = (UINT_PTR)managedPtr;   // Push된 노드 주소
+	///////////////////////////////////////////////////////
+#else
+	///////////////////////// LOG ///////////////////////// 
+	unsigned short logIdx = InterlockedIncrement16((SHORT*)&m_LogIndex);
+	m_LogArr[logIdx].threadID = thID;
+	m_LogArr[logIdx].isPush = true;					// Push
+	m_LogArr[logIdx].isCommit = true;				// after push commit
+	m_LogArr[logIdx].ptr0 = (UINT_PTR)oldNode;      // 현재 바라보고 있던 head
+	m_LogArr[logIdx].ptr1 = (UINT_PTR)newNode;   // Push된 노드 주소
+	///////////////////////////////////////////////////////
+#endif
 }
 
 template<typename T>
@@ -163,22 +210,13 @@ inline bool LockFreeStack<T>::Pop(T& data)
 	///////////////////////// LOG ///////////////////////// 
 	DWORD thID = GetThreadId(GetCurrentThread());
 	///////////////////////////////////////////////////////
-	
-	//Node* head;
-	//do {
-	//	head = m_Head;
-	//											// head->next의 주소는 InterlockedCompareExchangePointer 함수 호출 시점에 인자로 복사된다.
-	//											// 따라서 InterlockedCompareExchangePointer에서 수행하는 기능 자체는 원자성을 보장하지만,
-	//											// head->next의 값은 변할 수 있다. ABA 문제가 발생할 경우 head->next는 삭제된 노드일 수 있다. 
-	//} while (head && head != InterlockedCompareExchangePointer((PVOID*)&m_Head, (PVOID)head->next, (PVOID)head));
 
-	// 사실 상 위 코드에서의 문제점과 아래 코드에서의 문제점은 동일하다고 봐야함
+#if defined(AVOID_ABA_PROBLEM)
 	Node* head;
 	Node* headOrigin;
 	Node* nextNode;
 	do {
 		head = m_Head;
-#if defined(AVOID_ABA_PROBLEM)
 		headOrigin = (Node*)((UINT_PTR)head & mask);
 		// new/delete로 노드를 할당받는 방식이라면, 아래 코드에서 메모리 읽기 액세스 오류가 발생할 수 있다.
 		// 만약 다른 스레드에서 head에 해당하는 노드를 삭제한다면, 메모리 액세스 오류가 발생할 수 있기 때문이다. 
@@ -203,10 +241,47 @@ inline bool LockFreeStack<T>::Pop(T& data)
 		m_LogArr[logIdx].ptr0 = (UINT_PTR)head;			// 현재 바라보고 있던 head
 		m_LogArr[logIdx].ptr1 = (UINT_PTR)nextNode;		// head next
 		///////////////////////////////////////////////////////
+	} while (head && head != InterlockedCompareExchangePointer((PVOID*)&m_Head, (PVOID)nextNode, (PVOID)head));
+#elif defined(AVOID_ABA_PROBLEM_IMPROVED)
+	UINT_PTR incrementPart = InterlockedIncrement16(&m_Increment);	// 64 = 16
+	incrementPart <<= (64 - m_ControlBit);
+
+	Node* head;
+	Node* headOrigin;
+	Node* nextNode;
+	do {
+		head = m_Head;
+		headOrigin = (Node*)((UINT_PTR)head & mask);
+		nextNode = headOrigin->next;
+
+		///////////////////////// LOG ///////////////////////// 
+		unsigned short logIdx = InterlockedIncrement16((SHORT*)&m_LogIndex);
+		m_LogArr[logIdx].threadID = thID;
+		m_LogArr[logIdx].isPush = false;									// Pop
+		m_LogArr[logIdx].isCommit = false;									// before pop commit
+		m_LogArr[logIdx].ptr0 = (UINT_PTR)head;								// 현재 바라보고 있던 head
+		m_LogArr[logIdx].ptr1 = ((UINT_PTR)nextNode ^ incrementPart);		// head next
+		///////////////////////////////////////////////////////
+	} while (headOrigin && head != InterlockedCompareExchangePointer((PVOID*)&m_Head, (PVOID)((UINT_PTR)nextNode ^ incrementPart), (PVOID)head));
 #else
+	Node* head;
+	Node* nextNode;
+
+	do {
+		head = m_Head;
 		nextNode = head->next;
+
+		///////////////////////// LOG ///////////////////////// 
+		unsigned short logIdx = InterlockedIncrement16((SHORT*)&m_LogIndex);
+		m_LogArr[logIdx].threadID = thID;
+		m_LogArr[logIdx].isPush = false;				// Pop
+		m_LogArr[logIdx].isCommit = false;				// before pop commit
+		m_LogArr[logIdx].ptr0 = (UINT_PTR)head;			// 현재 바라보고 있던 head
+		m_LogArr[logIdx].ptr1 = (UINT_PTR)nextNode;		// head next
+		///////////////////////////////////////////////////////
+
+	} while (head && head != InterlockedCompareExchangePointer((PVOID*)&m_Head, (PVOID)nextNode, (PVOID)head));
 #endif
-	} while (head &&  head != InterlockedCompareExchangePointer((PVOID*)&m_Head, (PVOID)nextNode, (PVOID)head));
 	
 	///////////////////////// LOG ///////////////////////// 
 	unsigned short logIdx = InterlockedIncrement16((SHORT*)&m_LogIndex);
@@ -217,17 +292,23 @@ inline bool LockFreeStack<T>::Pop(T& data)
 	m_LogArr[logIdx].ptr1 = (UINT_PTR)nextNode;		// head next
 	///////////////////////////////////////////////////////
 
-	if (head != NULL) {
+
 #if defined(AVOID_ABA_PROBLEM)
+	if (head != NULL) {
+		data = headOrigin->data;
+#elif defined(AVOID_ABA_PROBLEM_IMPROVED)
+	if (headOrigin != NULL) {
 		data = headOrigin->data;
 #else
+	if (head != NULL) {
 		data = head->data;
 #endif
+
 		// delete 호출 시  Rtlxxxxx 함수에서 발생시키는 디버그 브레이크는 CRT에서 내는 것으로 판단
 		// 이 때 디버그 브레이크를 발생시키는 이유는 메모리 읽기 오류가 떴다기 보단, CRT에서 삭제된 포인터를 다시 삭제 요청을 해서 발생하는 것으로 추측
 		// 메모리 참조 오류를 CRT에서 참조하여 떴다는 것은 말이 안됌. 이미 이전에 나의 코드에서 메모리 참조 오류가 떴어야 함.
 
-#if defined(AVOID_ABA_PROBLEM)
+#if defined(AVOID_ABA_PROBLEM) || defined(AVOID_ABA_PROBLEM_IMPROVED)
 		Node* deleteNode = headOrigin;
 #else
 		Node* deleteNode = head;
