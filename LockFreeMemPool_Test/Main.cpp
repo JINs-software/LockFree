@@ -5,12 +5,11 @@
 #pragma comment(lib, "LockFreeMemoryPool")
 
 #define NUM_OF_THREADS	8
-#define TEST_LOOP		10000
-#define NUM_OF_LOOP		100
+#define NUM_OF_LOOP		1000
 #define NUM_OF_PTR		100
 
-//LockFreeMemPool g_LFMP(sizeof(int), 0);
-LockFreeMemPool g_LFMP(sizeof(int), NUM_OF_THREADS * NUM_OF_PTR);
+LockFreeMemPool g_LFMP(sizeof(int), 0);
+//LockFreeMemPool g_LFMP(sizeof(int), NUM_OF_THREADS * NUM_OF_PTR);
 bool errorFlag = false;
 
 unsigned WINAPI TestJob(void* arg) {
@@ -22,23 +21,28 @@ unsigned WINAPI TestJob(void* arg) {
 			// Alloc
 			for (int i = 0; i < incre; i++) {
 				ptrArr[i] = (int*)g_LFMP.Alloc();
-				int initVal = *ptrArr[i];
-				if (initVal != 0xFDFDFDFD) {
+				if (*ptrArr[i] != 0xFDFDFDFD) {			
+					// 락-프리 메모리 풀은 Free시 할당 영역을 0xFDFD..로 초기화함.
+					// 또는 new 연산자로 동적 할당이 필요할 시에도 0xFDFD..로 초기화한 후 할당함
+					// 따라서 Alloc을 호출한 쪽에서 할당받은 영역은 0xFDFD..로 초기화된 상태여야 함.
 					errorFlag = true;
 					DebugBreak();
 					return 1;
 				}
 				if (i > 0 && ptrArr[i] == ptrArr[i - 1]) {
-					//LogVectorCheck();
+					// 직전에 할당받은 주소가 다시 할당되었는지 체크함.
 					errorFlag = true;
 					DebugBreak();
 					return 1;
 				}
+
+				// 할당받은 공간에 특정 식별 값을 저장/
 				*ptrArr[i] = i;
 			}
 
 			// Free
 			for (int i = 0; i < incre; i++) {
+				// 반환 전 할당받은 공간에 저장된 식별 값이 아닌 경우 다른 스레드에서 오염시킨 것
 				if (*ptrArr[i] != i) {
 					errorFlag = true;
 					DebugBreak();
@@ -49,11 +53,14 @@ unsigned WINAPI TestJob(void* arg) {
 			}
 		}
 	}
+
+	std::cout << "Thread Work Finish!" << std::endl;
 	return 0;
 }
 
 int main() {
-	for (int i = 0; i < TEST_LOOP; i++) {
+	size_t testLoopCnt = 0;
+	while (true) {
 		InitLog();
 		HANDLE hThreads[NUM_OF_THREADS];
 		for (int i = 0; i < NUM_OF_THREADS; i++) {
@@ -70,7 +77,7 @@ int main() {
 			CloseHandle(hThreads[i]);
 		}
 
-		std::cout << "Test..." << std::endl;
+		std::cout << "All Thread's works Done !!! / TestLoop: " << testLoopCnt++ << std::endl;
 	}
 	return 0;
 }
