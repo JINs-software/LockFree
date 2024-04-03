@@ -3,4 +3,7 @@
   <ItemGroup>
     <ClCompile Include="LockFreeMemPool.cpp" />
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\include\LockFreeMemPool.h" />
+  </ItemGroup>
 </Project>
