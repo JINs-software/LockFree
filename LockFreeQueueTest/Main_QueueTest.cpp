@@ -42,8 +42,10 @@ unsigned WINAPI WorkerThreadJob(void* arg) {
 			for (int k = 1; k <= j; k++) {
 				DWORD out;
 				if (!g_LFQ.Dequeue(out)) {
+#if defined(LOGGING)
 					DebugBreak();
 					g_LFQ.PrintLog();
+#endif
 					DebugBreak();
 				}
 
@@ -58,7 +60,7 @@ unsigned WINAPI WorkerThreadJob(void* arg) {
 
 int main() {
 
-	int testCnt = 0;
+	size_t testCnt = 0;
 	while (true) {
 		HANDLE workerThreads[NUM_OF_WORKER_THREAD];
 		for (int i = 0; i < NUM_OF_WORKER_THREAD; i++) {
@@ -87,8 +89,10 @@ int main() {
 			if (_kbhit()) {
 				ctr = _getch();
 				if (ctr == 's' || ctr == 'S') {
+#if defined(LOGGING)
 					DebugBreak();
 					g_LFQ.PrintLog();
+#endif
 					DebugBreak();
 				}
 			}
@@ -110,10 +114,12 @@ int main() {
 			}
 		}
 
-		std::cout << "Test.." << std::endl;
+		std::cout << "TestCnt: " << testCnt++ << std::endl;
 		std::cout << "cmpNum: " << cmpNum << std::endl;
 
 		DATA_VALIDATE_TEST_VECTOR.clear();
+#if defined(LOGGING)
 		g_LFQ.ClearLog();
+#endif
 	}
 }

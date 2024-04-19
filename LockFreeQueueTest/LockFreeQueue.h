@@ -12,6 +12,8 @@
 #define SIMPLE_ENQUEUE
 //#define SWAP_CAS_LOCATION
 
+//#define LOGGING
+
 template<typename T>
 class LockFreeQueue {
 private:
@@ -30,6 +32,7 @@ private:
     short m_Increment;
     const unsigned long long mask = 0x0000'FFFF'FFFF'FFFF;
 
+#if defined(LOGGING)
     ///////////////////////// LOG ///////////////////////// 
     struct stLog {
         DWORD threadID = 0;
@@ -46,6 +49,7 @@ private:
     unsigned short m_LogIndex;
     std::mutex g_LogPrintMtx;
     ///////////////////////////////////////////////////////
+#endif
 
 public:
     LockFreeQueue() 
@@ -58,15 +62,19 @@ public:
         ///////////////////////// TEST ////////////////////////
         memset((void*)&test_CompareNode, 0xFDFD'FDFD, sizeof(Node));
 
+#if defined(LOGGING)
         ///////////////////////// LOG /////////////////////////
         memset( m_LogArr, 0, sizeof(stLog) * USHRT_MAX + 1);
         m_LogIndex = 0;
+#endif
     }
+#if defined(LOGGING)
     void ClearLog() {
         ///////////////////////// LOG /////////////////////////
         memset(m_LogArr, 0, sizeof(stLog) * USHRT_MAX + 1);
         m_LogIndex = 0;
     }
+#endif
 
     void Enqueue(T t) {
         ///////////////////////// LOG ///////////////////////// 
@@ -121,6 +129,8 @@ public:
 
 #if defined(SIMPLE_ENQUEUE)
             if (next == NULL) {
+
+#if defined(LOGGING)
                 ///////////////////////// LOG ///////////////////////// 
                 unsigned short logIdx = InterlockedIncrement16((SHORT*)&m_LogIndex);
                 m_LogArr[logIdx].threadID = thID;
@@ -131,12 +141,12 @@ public:
                 m_LogArr[logIdx].ptr1 = (UINT_PTR)next;         // 현재 바라보고 있는 Tail의 next
                 m_LogArr[logIdx].ptr2 = (UINT_PTR)managedPtr;   // Enqueue 예정 노드 주소
                 ///////////////////////////////////////////////////////
+#endif
 
                 if (InterlockedCompareExchangePointer((PVOID*)&originTail->next, (PVOID)managedPtr, next) == next) {
-                    //
                     //newNode->next = NULL;
-                    //
 
+#if defined(LOGGING)
                     ///////////////////////// LOG ///////////////////////// 
                     logIdx = InterlockedIncrement16((SHORT*)&m_LogIndex);
                     m_LogArr[logIdx].threadID = thID;
@@ -147,11 +157,13 @@ public:
                     m_LogArr[logIdx].ptr1 = (UINT_PTR)next;         // 바라보고 있던 Tail의 next
                     m_LogArr[logIdx].ptr2 = (UINT_PTR)managedPtr;   // 새로운 Tail의 Next (Tail 갱신은 미반영)
                     ///////////////////////////////////////////////////////
+#endif
 
                     //InterlockedCompareExchangePointer((PVOID*)&m_Tail, (PVOID)managedPtr, tail);
                     m_Tail = (Node*)managedPtr;
                     newNode->next = NULL;
 
+#if defined(LOGGING)
                     ///////////////////////// LOG ///////////////////////// 
                     logIdx = InterlockedIncrement16((SHORT*)&m_LogIndex);
                     m_LogArr[logIdx].threadID = thID;               // Enqueue
@@ -162,6 +174,7 @@ public:
                     m_LogArr[logIdx].ptr1 = (UINT_PTR)next;         // 새로운 Tail의 Next (Tail 갱신은 반영 후)
                     m_LogArr[logIdx].ptr2 = (UINT_PTR)managedPtr;
                     ///////////////////////////////////////////////////////
+#endif
                     break;
                 }
             }
@@ -311,6 +324,7 @@ public:
             // 이미 MSB부터 일부에 증분 비트로 노드를 식별하는 기법이 들어가 있기 때문.
             if (m_Head == head) {
                 if (next == NULL || next == (Node*)0xFFFF'FFFF'FFFF'FFFF) {
+#if defined(LOGGING)
                     ///////////////////////// LOG ///////////////////////// 
                     unsigned short logIdx = InterlockedIncrement16((SHORT*)&m_LogIndex);
                     m_LogArr[logIdx].ptr3 = 0xFFFF'FFFF'FFFF'FFFF;
@@ -320,9 +334,11 @@ public:
                     m_LogArr[logIdx].ptr0 = (UINT_PTR)head;     // 현재 바라보고 있는 head
                     m_LogArr[logIdx].ptr1 = (UINT_PTR)next;;    // 현재 바라보고 있는 head의 next
                     ///////////////////////////////////////////////////////
+#endif
                     return false;
                 }
                 else {
+#if defined(LOGGING)
                     ///////////////////////// LOG ///////////////////////// 
                     unsigned short logIdx = InterlockedIncrement16((SHORT*)&m_LogIndex);
                     m_LogArr[logIdx].threadID = thID;
@@ -331,9 +347,12 @@ public:
                     m_LogArr[logIdx].ptr0 = (UINT_PTR)head;     // 현재 바라보고 있는 head
                     m_LogArr[logIdx].ptr1 = (UINT_PTR)next;;    // 현재 바라보고 있는 head의 next
                     ///////////////////////////////////////////////////////
+#endif
+
                     Node* originHeadNext = (Node*)((UINT_PTR)next & mask);
                     t = originHeadNext->data;
                     if (InterlockedCompareExchangePointer((PVOID*)&m_Head, next, head) == head) {
+#if defined(LOGGING)
                         ///////////////////////// LOG ///////////////////////// 
                         unsigned short logIdx = InterlockedIncrement16((SHORT*)&m_LogIndex);
                         m_LogArr[logIdx].threadID = thID;
@@ -342,9 +361,9 @@ public:
                         m_LogArr[logIdx].ptr0 = (UINT_PTR)head;
                         m_LogArr[logIdx].ptr1 = (UINT_PTR)next;
                         ///////////////////////////////////////////////////////
-
-                        //Node* originHeadNext = (Node*)((UINT_PTR)next & mask);
-                        //t = originHeadNext->data;
+#endif
+                        // Node* originHeadNext = (Node*)((UINT_PTR)next & mask);
+                        // t = originHeadNext->data;
                         // 다른 스레드 이후 Dequeue하여 originHeadNext에 해당하는 노드를 Free할 수 있음
                         // 이 경우 Free된 노드를 참조하는 셈.
                         // => t 대입을 위쪽으로 올린다.
@@ -361,11 +380,13 @@ public:
         return true;
     }
 
+#if defined(LOGGING)
     ///////////////////////// LOG ///////////////////////// 
     void PrintLog();
-    
+#endif
 };
 
+#if defined(LOGGING)
 template<typename T>
 void LockFreeQueue<T>::PrintLog()
 {
@@ -450,4 +471,4 @@ void LockFreeQueue<T>::PrintLog()
 
     std::cout << "파일이 생성되었습니다: " << filePath << std::endl;
 }
- 
+#endif
