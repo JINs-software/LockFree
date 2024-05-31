@@ -2,21 +2,12 @@
 #include <winnt.h>
 #include <iomanip>
 
-//#define BEFORE_COMMIT_LOG
-//#define AFTER_COMMIT_LOG
-
+#if defined(ON_LOG)
 std::vector<stLog> g_LogVector;
 std::mutex g_LogMtx;
 std::mutex g_MallocMtx;
 LONG g_SpinLockFlag;
 std::mutex g_LogPrintMtx;
-
-//struct stLog {
-//	DWORD	threadID;
-//	BOOL	isAlloc;
-//	PBYTE	oldFreeFront;
-//	PBYTE	newFreeFront;
-//};
 
 struct stHeadLog {
 	PBYTE	oldFreeFront;
@@ -122,6 +113,7 @@ void LogVectorCheck() {
 		}
 	}
 }
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 // [»ý¼ºÀÚ] LockFreeMemPool::LockFreeMemPool(size_t unitSize, size_t unitCnt)

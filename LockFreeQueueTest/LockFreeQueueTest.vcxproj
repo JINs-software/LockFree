@@ -136,10 +136,10 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="LockFreeQueue.h" />
+    <ClCompile Include="Main_QueueTest.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Main_QueueTest.cpp" />
+    <ClInclude Include="..\include\LockFreeQueue.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

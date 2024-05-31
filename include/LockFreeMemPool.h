@@ -9,11 +9,14 @@
 #include <winnt.h>
 #include <iostream>
 
+//#define ON_LOG
+
 //#define DATA_VALID_TEST
 //#define SIMPLE_MEM_POOL
 #define THREAD_SAFE
 #define ABOID_ABA_PROBLEM_IMPROVED
 
+#if defined(ON_LOG)
 struct stLog {
 	//LARGE_INTEGER highQualityTime;
 	DWORD	threadID;
@@ -31,6 +34,7 @@ extern LONG g_SpinLockFlag;
 // g_LogVector 로그 추적
 void LogVectorCheck();
 void InitLog();
+#endif
 
 class LockFreeMemPool
 {

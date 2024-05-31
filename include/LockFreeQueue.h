@@ -77,15 +77,21 @@ public:
 #endif
 
     void Enqueue(T t) {
+#if defined(LOGGING)
         ///////////////////////// LOG ///////////////////////// 
         DWORD thID = GetThreadId(GetCurrentThread());
         ///////////////////////////////////////////////////////
+#endif
 
         Node* newNode = (Node*)LFMP.Alloc();
         if (newNode == NULL) {
             DebugBreak();
         }
-        if (memcmp((void*)newNode, (void*)&test_CompareNode, sizeof(Node)) == 0) {
+        //if (memcmp((void*)newNode, (void*)&test_CompareNode, sizeof(Node)) != 0) {
+        //    DebugBreak();
+        //}
+        // => 검증 필요
+        if (memcmp((void*)newNode, (void*)&test_CompareNode, sizeof(Node::data)) != 0) {
             DebugBreak();
         }
         newNode->data = t;
@@ -245,10 +251,11 @@ public:
             InterlockedIncrement(&m_Size);
             return false;
         }
-
+#if defined(LOGGING)
         ///////////////////////// LOG ///////////////////////// 
         DWORD thID = GetThreadId(GetCurrentThread());
         ///////////////////////////////////////////////////////
+#endif
 
         while (true) {
             Node* head = m_Head;
