@@ -25,9 +25,10 @@ private:
 
     LockFreeMemPool LFMP;
 
-    Node* m_Head;        // 시작노드를 포인트한다.
-    Node* m_Tail;        // 마지막노드를 포인트한다.
-    size_t m_Size;
+    Node*   m_Head;        // 시작노드를 포인트한다.
+    Node*   m_Tail;        // 마지막노드를 포인트한다.
+    //size_t m_Size;
+    LONG    m_Size;
 
     short m_Increment;
     const unsigned long long mask = 0x0000'FFFF'FFFF'FFFF;
@@ -75,6 +76,10 @@ public:
         m_LogIndex = 0;
     }
 #endif
+
+    LONG GetSize() {
+        return m_Size;
+    }
 
     void Enqueue(T t) {
 #if defined(LOGGING)
@@ -222,7 +227,8 @@ public:
 #endif
         }
 
-        InterlockedExchangeAdd(&m_Size, 1);
+        //InterlockedExchangeAdd(&m_Size, 1);
+        InterlockedIncrement(&m_Size);
     }
 
     bool Dequeue(T& t) {
