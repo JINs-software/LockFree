@@ -231,7 +231,7 @@ public:
         InterlockedIncrement(&m_Size);
     }
 
-    bool Dequeue(T& t) {
+    bool Dequeue(T& t, bool singleReader = false) {
         //if (m_Size == 0) {
         //    return false;
         //}
@@ -263,117 +263,118 @@ public:
         ///////////////////////////////////////////////////////
 #endif
 
-        while (true) {
-            Node* head = m_Head;
-            Node* originHead = (Node*)((UINT_PTR)head & mask);
-            Node* next = originHead->next;
+        if (!singleReader) {
+            while (true) {
+                Node* head = m_Head;
+                Node* originHead = (Node*)((UINT_PTR)head & mask);
+                Node* next = originHead->next;
 
-            // Dequeue 시 문제 발생
-            // (상황)
-            // 0xA000[더미] -> 0xB000 -> 0xC000 -> NULL
-            // m_Head          m_Tail
-            // 
-            // (1) threadA Dequeue 시도 가 orginHead = 0xA000 저장, next 변수 대입은 이루어지지 않음
-            // (2) threadB Dequeue 시도 및 커밋까지 완료 
-            // 0xB000[더미] -> 0xC000 -> NULL
-            // (3) threadB Enqueue 시도 및 커밋까지 완료
-            // 0xB000[더미] -> 0xC000 -> 0xA000 -> NULL
-            // (4) threadA가 마저 Dequeue 시도, 여기서 기존에 가리키던 0xA000이 재활용되어 Enqueue된 상태, 따라서 next 변수에는 NULL이 대입됨
-            // (5) next가 NULL이므로 아래 조건문에 걸려 Dequeue의 실패로 이어짐
-            //
-            // (분석)
-            // ABA 문제와 비슷하다. 기존 ABA 해결의 접근 방식에서 활용하는 비트 마스킹 기법을 아래 조건문에서는 활용될 수 없는 구조임.
-            // 단순히 next를 체크하는 방식에서 변경이 필요함.
-            // => head 변수로 읽은 시점과 next 변수로 읽은 시점이 동일함을 보장해주어야 한다. 동일한 노드의 주소를 읽고, 그 노드의 next를 읽는 것을 보장해주어야 한다.
-            // 
-            //if(next == NULL) {
-            //    ///////////////////////// LOG ///////////////////////// 
-            //    size_t logIdx = InterlockedIncrement(&m_LogIndex);
-            //    if (logIdx >= LOG_ARR_SIZE) {
-            //        DebugBreak();
-            //    }
-            //    m_LogArr[logIdx].ptr3 = 0xFFFF'FFFF'FFFF'FFFF;
-            //    m_LogArr[logIdx].threadID = thID;
-            //    m_LogArr[logIdx].isEnqueue = false;         // Dequeue
-            //    m_LogArr[logIdx].isCommit = false;          // before dequee commit
-            //    m_LogArr[logIdx].ptr0 = (UINT_PTR)head;     // 현재 바라보고 있는 head
-            //    m_LogArr[logIdx].ptr1 = (UINT_PTR)next;;    // 현재 바라보고 있는 head의 next
-            //    ///////////////////////////////////////////////////////
-            //    return false;
-            //}
-            //else {
-            //    ///////////////////////// LOG ///////////////////////// 
-            //    size_t logIdx = InterlockedIncrement(&m_LogIndex);
-            //    if (logIdx >= LOG_ARR_SIZE) {
-            //        DebugBreak();
-            //    }
-            //    m_LogArr[logIdx].threadID = thID;
-            //    m_LogArr[logIdx].isEnqueue = false;         // Dequeue
-            //    m_LogArr[logIdx].isCommit = false;          // before dequee commit
-            //    m_LogArr[logIdx].ptr0 = (UINT_PTR)head;     // 현재 바라보고 있는 head
-            //    m_LogArr[logIdx].ptr1 = (UINT_PTR)next;;    // 현재 바라보고 있는 head의 next
-            //    ///////////////////////////////////////////////////////
-            //    if (InterlockedCompareExchangePointer((PVOID*)&m_Head, next, head) == head) {
-            //        ///////////////////////// LOG ///////////////////////// 
-            //        size_t logIdx = InterlockedIncrement(&m_LogIndex);
-            //        if (logIdx >= LOG_ARR_SIZE) {
-            //            DebugBreak();
-            //        }
-            //        m_LogArr[logIdx].threadID = thID;
-            //        m_LogArr[logIdx].isEnqueue = false;
-            //        m_LogArr[logIdx].isCommit = true;       // after dequeue commit
-            //        m_LogArr[logIdx].ptr0 = (UINT_PTR)head;
-            //        m_LogArr[logIdx].ptr1 = (UINT_PTR)next;
-            //        ///////////////////////////////////////////////////////
-            //
-            //        Node* originHeadNext = (Node*)((UINT_PTR)next & mask);
-            //        t = originHeadNext->data;
-            //        LFMP.Free(originHead);
-            //        break;
-            //    }
-            //}
+                // Dequeue 시 문제 발생
+                // (상황)
+                // 0xA000[더미] -> 0xB000 -> 0xC000 -> NULL
+                // m_Head          m_Tail
+                // 
+                // (1) threadA Dequeue 시도 가 orginHead = 0xA000 저장, next 변수 대입은 이루어지지 않음
+                // (2) threadB Dequeue 시도 및 커밋까지 완료 
+                // 0xB000[더미] -> 0xC000 -> NULL
+                // (3) threadB Enqueue 시도 및 커밋까지 완료
+                // 0xB000[더미] -> 0xC000 -> 0xA000 -> NULL
+                // (4) threadA가 마저 Dequeue 시도, 여기서 기존에 가리키던 0xA000이 재활용되어 Enqueue된 상태, 따라서 next 변수에는 NULL이 대입됨
+                // (5) next가 NULL이므로 아래 조건문에 걸려 Dequeue의 실패로 이어짐
+                //
+                // (분석)
+                // ABA 문제와 비슷하다. 기존 ABA 해결의 접근 방식에서 활용하는 비트 마스킹 기법을 아래 조건문에서는 활용될 수 없는 구조임.
+                // 단순히 next를 체크하는 방식에서 변경이 필요함.
+                // => head 변수로 읽은 시점과 next 변수로 읽은 시점이 동일함을 보장해주어야 한다. 동일한 노드의 주소를 읽고, 그 노드의 next를 읽는 것을 보장해주어야 한다.
+                // 
+                //if(next == NULL) {
+                //    ///////////////////////// LOG ///////////////////////// 
+                //    size_t logIdx = InterlockedIncrement(&m_LogIndex);
+                //    if (logIdx >= LOG_ARR_SIZE) {
+                //        DebugBreak();
+                //    }
+                //    m_LogArr[logIdx].ptr3 = 0xFFFF'FFFF'FFFF'FFFF;
+                //    m_LogArr[logIdx].threadID = thID;
+                //    m_LogArr[logIdx].isEnqueue = false;         // Dequeue
+                //    m_LogArr[logIdx].isCommit = false;          // before dequee commit
+                //    m_LogArr[logIdx].ptr0 = (UINT_PTR)head;     // 현재 바라보고 있는 head
+                //    m_LogArr[logIdx].ptr1 = (UINT_PTR)next;;    // 현재 바라보고 있는 head의 next
+                //    ///////////////////////////////////////////////////////
+                //    return false;
+                //}
+                //else {
+                //    ///////////////////////// LOG ///////////////////////// 
+                //    size_t logIdx = InterlockedIncrement(&m_LogIndex);
+                //    if (logIdx >= LOG_ARR_SIZE) {
+                //        DebugBreak();
+                //    }
+                //    m_LogArr[logIdx].threadID = thID;
+                //    m_LogArr[logIdx].isEnqueue = false;         // Dequeue
+                //    m_LogArr[logIdx].isCommit = false;          // before dequee commit
+                //    m_LogArr[logIdx].ptr0 = (UINT_PTR)head;     // 현재 바라보고 있는 head
+                //    m_LogArr[logIdx].ptr1 = (UINT_PTR)next;;    // 현재 바라보고 있는 head의 next
+                //    ///////////////////////////////////////////////////////
+                //    if (InterlockedCompareExchangePointer((PVOID*)&m_Head, next, head) == head) {
+                //        ///////////////////////// LOG ///////////////////////// 
+                //        size_t logIdx = InterlockedIncrement(&m_LogIndex);
+                //        if (logIdx >= LOG_ARR_SIZE) {
+                //            DebugBreak();
+                //        }
+                //        m_LogArr[logIdx].threadID = thID;
+                //        m_LogArr[logIdx].isEnqueue = false;
+                //        m_LogArr[logIdx].isCommit = true;       // after dequeue commit
+                //        m_LogArr[logIdx].ptr0 = (UINT_PTR)head;
+                //        m_LogArr[logIdx].ptr1 = (UINT_PTR)next;
+                //        ///////////////////////////////////////////////////////
+                //
+                //        Node* originHeadNext = (Node*)((UINT_PTR)next & mask);
+                //        t = originHeadNext->data;
+                //        LFMP.Free(originHead);
+                //        break;
+                //    }
+                //}
 
-            // 아래 조건문에서 m_head == head가 충족한다는 것은 위 head와 next는 동일한 노드에서 읽은 것이 보장된다.
-            // 이미 MSB부터 일부에 증분 비트로 노드를 식별하는 기법이 들어가 있기 때문.
-            if (m_Head == head) {
-                if (next == NULL || next == (Node*)0xFFFF'FFFF'FFFF'FFFF) {
+                // 아래 조건문에서 m_head == head가 충족한다는 것은 위 head와 next는 동일한 노드에서 읽은 것이 보장된다.
+                // 이미 MSB부터 일부에 증분 비트로 노드를 식별하는 기법이 들어가 있기 때문.
+                if (m_Head == head) {
+                    if (next == NULL || next == (Node*)0xFFFF'FFFF'FFFF'FFFF) {
 #if defined(LOGGING)
-                    ///////////////////////// LOG ///////////////////////// 
-                    unsigned short logIdx = InterlockedIncrement16((SHORT*)&m_LogIndex);
-                    m_LogArr[logIdx].ptr3 = 0xFFFF'FFFF'FFFF'FFFF;
-                    m_LogArr[logIdx].threadID = thID;
-                    m_LogArr[logIdx].isEnqueue = false;         // Dequeue
-                    m_LogArr[logIdx].isCommit = false;          // before dequee commit
-                    m_LogArr[logIdx].ptr0 = (UINT_PTR)head;     // 현재 바라보고 있는 head
-                    m_LogArr[logIdx].ptr1 = (UINT_PTR)next;;    // 현재 바라보고 있는 head의 next
-                    ///////////////////////////////////////////////////////
+                        ///////////////////////// LOG ///////////////////////// 
+                        unsigned short logIdx = InterlockedIncrement16((SHORT*)&m_LogIndex);
+                        m_LogArr[logIdx].ptr3 = 0xFFFF'FFFF'FFFF'FFFF;
+                        m_LogArr[logIdx].threadID = thID;
+                        m_LogArr[logIdx].isEnqueue = false;         // Dequeue
+                        m_LogArr[logIdx].isCommit = false;          // before dequee commit
+                        m_LogArr[logIdx].ptr0 = (UINT_PTR)head;     // 현재 바라보고 있는 head
+                        m_LogArr[logIdx].ptr1 = (UINT_PTR)next;;    // 현재 바라보고 있는 head의 next
+                        ///////////////////////////////////////////////////////
 #endif
-                    return false;
-                }
-                else {
-#if defined(LOGGING)
-                    ///////////////////////// LOG ///////////////////////// 
-                    unsigned short logIdx = InterlockedIncrement16((SHORT*)&m_LogIndex);
-                    m_LogArr[logIdx].threadID = thID;
-                    m_LogArr[logIdx].isEnqueue = false;         // Dequeue
-                    m_LogArr[logIdx].isCommit = false;          // before dequee commit
-                    m_LogArr[logIdx].ptr0 = (UINT_PTR)head;     // 현재 바라보고 있는 head
-                    m_LogArr[logIdx].ptr1 = (UINT_PTR)next;;    // 현재 바라보고 있는 head의 next
-                    ///////////////////////////////////////////////////////
-#endif
-
-                    Node* originHeadNext = (Node*)((UINT_PTR)next & mask);
-                    t = originHeadNext->data;
-                    if (InterlockedCompareExchangePointer((PVOID*)&m_Head, next, head) == head) {
+                        return false;
+                    }
+                    else {
 #if defined(LOGGING)
                         ///////////////////////// LOG ///////////////////////// 
                         unsigned short logIdx = InterlockedIncrement16((SHORT*)&m_LogIndex);
                         m_LogArr[logIdx].threadID = thID;
-                        m_LogArr[logIdx].isEnqueue = false;
-                        m_LogArr[logIdx].isCommit = true;       // after dequeue commit
-                        m_LogArr[logIdx].ptr0 = (UINT_PTR)head;
-                        m_LogArr[logIdx].ptr1 = (UINT_PTR)next;
+                        m_LogArr[logIdx].isEnqueue = false;         // Dequeue
+                        m_LogArr[logIdx].isCommit = false;          // before dequee commit
+                        m_LogArr[logIdx].ptr0 = (UINT_PTR)head;     // 현재 바라보고 있는 head
+                        m_LogArr[logIdx].ptr1 = (UINT_PTR)next;;    // 현재 바라보고 있는 head의 next
                         ///////////////////////////////////////////////////////
+#endif
+
+                        Node* originHeadNext = (Node*)((UINT_PTR)next & mask);
+                        t = originHeadNext->data;
+                        if (InterlockedCompareExchangePointer((PVOID*)&m_Head, next, head) == head) {
+#if defined(LOGGING)
+                            ///////////////////////// LOG ///////////////////////// 
+                            unsigned short logIdx = InterlockedIncrement16((SHORT*)&m_LogIndex);
+                            m_LogArr[logIdx].threadID = thID;
+                            m_LogArr[logIdx].isEnqueue = false;
+                            m_LogArr[logIdx].isCommit = true;       // after dequeue commit
+                            m_LogArr[logIdx].ptr0 = (UINT_PTR)head;
+                            m_LogArr[logIdx].ptr1 = (UINT_PTR)next;
+                            ///////////////////////////////////////////////////////
 #endif
                         // Node* originHeadNext = (Node*)((UINT_PTR)next & mask);
                         // t = originHeadNext->data;
@@ -381,9 +382,32 @@ public:
                         // 이 경우 Free된 노드를 참조하는 셈.
                         // => t 대입을 위쪽으로 올린다.
 
-                        LFMP.Free(originHead);
-                        break;
+                            LFMP.Free(originHead);
+                            break;
+                        }
                     }
+                }
+            }
+        }
+        else {
+            Node* head = m_Head;
+            Node* originHead = (Node*)((UINT_PTR)head & mask);
+            Node* next = originHead->next;
+
+            if (m_Head != head) {
+                DebugBreak();  // 큐 사이즈 > 0을 확인하였기에 예외처리 
+                return false;
+            }
+            else {
+                if (next == NULL || next == (Node*)0xFFFF'FFFF'FFFF'FFFF) {
+                    DebugBreak();  // 큐 사이즈 > 0을 확인하였기에 예외처리 
+                    return false;
+                }
+                else {
+                    Node* originHeadNext = (Node*)((UINT_PTR)next & mask);
+                    t = originHeadNext->data;
+                    m_Head = next;
+                    LFMP.Free(originHead);
                 }
             }
         }
