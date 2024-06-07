@@ -77,7 +77,7 @@ public:
     }
 #endif
 
-    LONG GetSize() {
+    inline LONG GetSize() {
         return m_Size;
     }
 
