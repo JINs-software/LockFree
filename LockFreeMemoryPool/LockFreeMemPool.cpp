@@ -296,8 +296,9 @@ void* LockFreeMemPool::Alloc()
 			DebugBreak();
 		}
 
-		//ret = malloc(m_UnitSize + sizeof(UINT_PTR));
+#if defined(_DEBUG)
 		memset(ret, 0xFDFDFDFD, m_UnitSize + sizeof(UINT_PTR));
+#endif
 		ismalloc = true;
 	}
 	else {
@@ -528,7 +529,9 @@ void LockFreeMemPool::Free(void* address)
 		increment <<= (64 - 16);
 
 		PBYTE ptr = (PBYTE)address;
+#if defined(_DEBUG)
 		memset(address, 0xFDFDFDFD, m_UnitSize + sizeof(UINT_PTR));
+#endif
 		ptr += m_UnitSize;
 #if defined(THREAD_SAFE)
 		PBYTE freeFront;
@@ -635,7 +638,9 @@ std::pair<PBYTE, PBYTE> LockFreeMemPool::initChunk(size_t unitSize, size_t unitC
 #else
 PBYTE LockFreeMemPool::initChunk(size_t unitSize, size_t unitCnt) {
 	PBYTE chunk = (PBYTE)malloc((unitSize + sizeof(UINT_PTR)) * unitCnt);
+#if defined(_DEBUG)
 	memset(chunk, 0xFDFD'FDFD, (unitSize + sizeof(UINT_PTR)) * unitCnt);
+#endif
 	PBYTE ptr = chunk;
 
 	for (size_t idx = 0; idx < unitCnt - 1; idx++) {

@@ -27,7 +27,6 @@ private:
 
     Node*   m_Head;        // 시작노드를 포인트한다.
     Node*   m_Tail;        // 마지막노드를 포인트한다.
-    //size_t m_Size;
     LONG    m_Size;
 
     short m_Increment;
@@ -60,8 +59,10 @@ public:
         m_Head->next = NULL;
         m_Tail = m_Head;
 
+#if defined(_DEBUG)
         ///////////////////////// TEST ////////////////////////
         memset((void*)&test_CompareNode, 0xFDFD'FDFD, sizeof(Node));
+#endif
 
 #if defined(LOGGING)
         ///////////////////////// LOG /////////////////////////
@@ -92,13 +93,16 @@ public:
         if (newNode == NULL) {
             DebugBreak();
         }
+
+#if defined(_DEBUG)
         //if (memcmp((void*)newNode, (void*)&test_CompareNode, sizeof(Node)) != 0) {
         //    DebugBreak();
         //}
-        // => 검증 필요
+        // => 검증 필요 (이전 버전 오류?)
         if (memcmp((void*)newNode, (void*)&test_CompareNode, sizeof(Node::data)) != 0) {
             DebugBreak();
         }
+#endif
         newNode->data = t;
 #if defined(SWAP_CAS_LOCATION)
         newNode->next = NULL;
