@@ -17,11 +17,26 @@ private:
         T data;
         Node* next;
     };
-    struct iterator {
 
-        iterator(Node*);
+public:
+    struct iterator {
+        Node* current;
+
+        iterator(Node* head) : current(head) {}
+        bool operator!=(const iterator& other) const {
+            return current != other.current;
+        }
+        bool pop(T& t) {
+            if (current == NULL) {
+                return false;
+            }
+
+            t = current->data;
+            current = current->next;
+        }
     };
 
+private:
     LockFreeMemPool LFMP;
 
     Node*   m_Head;        // 시작노드를 포인트한다.
@@ -98,6 +113,7 @@ public:
                 // 이미 MSB부터 일부에 증분 비트로 노드를 식별하는 기법이 들어가 있기 때문.
                 if (m_Head == head) {
                     if (next == NULL || next == (Node*)0xFFFF'FFFF'FFFF'FFFF) {
+                        InterlockedIncrement(&m_Size);
                         return false;
                     }
                     else {
@@ -139,13 +155,12 @@ public:
 
     iterator Dequeue() {
         Node* dummy = (Node*)LFMP.Alloc();
-        if (newNode == NULL) {
+        if (dummy == NULL) {
             DebugBreak();
         }
 
-        dummy->data = t;
 #if defined(SIMPLE_ENQUEUE)
-        dummy->next = (Node*)0xFFFF'FFFF'FFFF'FFFF;
+        dummy->next = (Node*)NULL;
 #elif defined(SWAP_CAS_LOCATION)
         DebugBreak();
         // to do: SWAP_CAS_LOCATION 모드 구현
@@ -163,7 +178,6 @@ public:
 #if defined(SIMPLE_ENQUEUE)
             if (next == NULL) {
                 if (InterlockedCompareExchangePointer((PVOID*)&originTail->next, (PVOID)0xFFFF'FFFF'FFFF'FFFF, next) == next) {
-                    //m_Tail = (Node*)managedDummyPtr;
                     break;
                 }
             }
@@ -186,16 +200,32 @@ public:
         Node* head;
         while (true) {
             head = m_Head;
-            if (InterlockedCompareExchange(&m_Head, managedDummyPtr, m_Head) == m_Head) {
+            if (InterlockedCompareExchangePointer((PVOID*)&m_Head, (PVOID)managedDummyPtr, head) == head) {
                 break;
             }
         }
 
-        Node* beforeTail = m_Tail;
-        m_Tail = managedDummyPtr;
-        beforeTail->next = NULL;
+        Node* originHead = (Node*)((UINT_PTR)head & mask);
+        Node* current = originHead->next;
+        UINT nodeCnt = 0;
+        while ((UINT_PTR)current != 0xFFFF'FFFF'FFFF'FFFF) {
+            nodeCnt++;
+            Node* originPtr = (Node*)((UINT_PTR)current & mask);
+            current = originPtr->next;
+        }
+
+        if (queueSize < nodeCnt) {
+            DebugBreak();
+        }
+        
+        InterlockedAdd(&m_Size, queueSize - nodeCnt);
 
 
-        return iterator(head);
+        Node* beforeOrgTail = (Node*)((UINT_PTR)m_Tail & mask);
+        m_Tail = (Node*)managedDummyPtr;
+
+        beforeOrgTail->next = NULL;
+        Node* beforeOrgHead = (Node*)((UINT_PTR)head & mask);
+        return iterator(beforeOrgHead->next);
     }
 };
