@@ -20,6 +20,7 @@ struct stLog {
     void* tail;
     void* next;
     bool commited;
+    LONG queueSize;
     BYTE detail;
 };
 
@@ -56,52 +57,54 @@ void PrintLog() {
         if (LogVec[i].type == 0) {
             if (!LogVec[i].commited) {
                 logfile << "BEFORE ENQUEUE COMMIT" << endl;
+                logfile << "m_Head          : " << LogVec[i].head << endl;
+                logfile << "tail            : " << LogVec[i].tail << endl;
+                logfile << "tail->next      : " << LogVec[i].next << endl;
             }
             else {
                 logfile << "AFTER ENQUEUE COMMIT" << endl;
+                logfile << "m_Head          : " << LogVec[i].head << endl;
+                logfile << "tail(new)       : " << LogVec[i].tail << endl;
+                //logfile << "head->next(new) : " << LogVec[i].next << endl;
             }
-
-            logfile << "HEAD     : " << LogVec[i].head << endl;
-            logfile << "TAIL     : " << LogVec[i].tail << endl;
-            logfile << "TAIL NEXT: " << LogVec[i].next << endl;
         }
         else if (LogVec[i].type == 1) {
             if (!LogVec[i].commited) {
                 logfile << "BEFORE DEQUEUE COMMIT" << endl;
+                logfile << "head            : " << LogVec[i].head << endl;
+                logfile << "head->next      : " << LogVec[i].next << endl;
+                logfile << "m_Tail          : " << LogVec[i].tail << endl;
             }
             else {
                 logfile << "AFTER DEQUEUE COMMIT" << endl;
+                logfile << "head(new)       : " << LogVec[i].head << endl;
+                logfile << "head->next(new) : " << LogVec[i].next << endl;
+                logfile << "m_Tail          : " << LogVec[i].tail << endl;
             }
-
-            logfile << "HEAD     : " << LogVec[i].head << endl;
-            logfile << "HEAD NEXT: " << LogVec[i].next << endl;
-            logfile << "TAIL     : " << LogVec[i].tail << endl;
         }
         else if (LogVec[i].type == 2) {
             if (!LogVec[i].commited) {
                 if (LogVec[i].detail == 0) {
-                    logfile << "BEFORE ENQUEUE COMMIT [ITER]" << endl;
-                    logfile << "HEAD     : " << LogVec[i].head << endl;
-                    logfile << "TAIL     : " << LogVec[i].tail << endl;
-                    logfile << "TAIL NEXT: " << LogVec[i].next << endl;
+                    logfile << "BEFORE ENQUEUE BLOCK [ITER]" << endl;
+                    logfile << "m_Head          : " << LogVec[i].head << endl;
+                    logfile << "tail            : " << LogVec[i].tail << endl;
+                    logfile << "tail->next      : " << LogVec[i].next << endl;
                 }
                 else if (LogVec[i].detail == 1) {
-                    logfile << "AFTER ENQUEUE COMMIT [ITER]" << endl;
-                    logfile << "HEAD     : " << LogVec[i].head << endl;
-                    logfile << "TAIL     : " << LogVec[i].tail << endl;
-                    logfile << "TAIL NEXT: " << LogVec[i].next << endl;
+                    logfile << "AFTER ENQUEUE BLOCK [ITER]" << endl;
+                    logfile << "m_Head          : " << LogVec[i].head << endl;
+                    logfile << "tail            : " << LogVec[i].tail << endl;
                 }
                 else if (LogVec[i].detail == 2) {
-                    logfile << "BEFORE DEQUEUE COMMIT [ITER]" << endl;
-                    logfile << "HEAD     : " << LogVec[i].head << endl;
-                    logfile << "HEAD NEXT: " << LogVec[i].next << endl;
-                    logfile << "TAIL     : " << LogVec[i].tail << endl;
+                    logfile << "BEFORE SWAP DUMMY [ITER]" << endl;
+                    logfile << "head            : " << LogVec[i].head << endl;
+                    logfile << "head->next      : " << LogVec[i].next << endl;
+                    logfile << "m_Tail          : " << LogVec[i].tail << endl;
                 }
                 else if (LogVec[i].detail == 3) {
-                    logfile << "AFTER DEQUEUE COMMIT [ITER]" << endl;
-                    logfile << "HEAD     : " << LogVec[i].head << endl;
-                    logfile << "HEAD NEXT: " << LogVec[i].next << endl;
-                    logfile << "TAIL     : " << LogVec[i].tail << endl;
+                    logfile << "AFTER SWAP DUMMY[ITER]" << endl;
+                    logfile << "dummy(new)      : " << LogVec[i].head << endl;
+                    logfile << "m_Tail          : " << LogVec[i].tail << endl;
                 }
             }
             else {
@@ -111,12 +114,14 @@ void PrintLog() {
                 logfile << "TAIL     : " << LogVec[i].tail << endl;
             }
         }
+
+        logfile << "queueSize     : " << LogVec[i].queueSize << endl;
     }
 
     cout << "로그 파일 완료" << endl;
 }
 
-void Logging(BYTE type, void* head, void* tail, void* next, bool commited, BYTE detail = 0) {
+void Logging(BYTE type, void* head, void* tail, void* next, bool commited, LONG queueSize, BYTE detail = 0) {
     USHORT idx = InterlockedIncrement16((SHORT*)&LogIndex);
     idx -= 1;
    
@@ -125,36 +130,37 @@ void Logging(BYTE type, void* head, void* tail, void* next, bool commited, BYTE 
     LogVec[idx].tail = tail;
     LogVec[idx].next = next;
     LogVec[idx].commited = commited;
+    LogVec[idx].queueSize = queueSize;
     LogVec[idx].detail = detail;
 }
 
-void TRY_ENQUEUE(void* head, void* tail, void* next) {
-    Logging(0, head, tail, next, false);
+void TRY_ENQUEUE(void* head, void* tail, void* next, LONG queueSize) {
+    Logging(0, head, tail, next, false, queueSize);
 }
-void COMMIT_ENQUEUE(void* head, void* tail, void* next) {
-    Logging(0, head, tail,next,  true);
+void COMMIT_ENQUEUE(void* head, void* tail, void* next, LONG queueSize) {
+    Logging(0, head, tail,next,  true, queueSize);
 }
-void TRY_DEQUEUE(void* head, void* tail, void* next) {
-    Logging(1, head, tail, next, false);
+void TRY_DEQUEUE(void* head, void* tail, void* next, LONG queueSize) {
+    Logging(1, head, tail, next, false, queueSize);
 }
-void COMMIT_DEQUEUE(void* head, void* tail, void* next) {
-    Logging(1, head, tail,next,  true);
+void COMMIT_DEQUEUE(void* head, void* tail, void* next, LONG queueSize) {
+    Logging(1, head, tail,next,  true, queueSize);
 }
 
-void TRY_DEQUEUE_ITER_TAIL(void* head, void* tail, void* next) {
-    Logging(2, head, tail, next, false, 0);
+void TRY_DEQUEUE_ITER_TAIL(void* head, void* tail, void* next, LONG queueSize) {
+    Logging(2, head, tail, next, false, queueSize, 0);
 }
-void TRY_DEQUEUE_ITER_TAIL_COMMIT(void* head, void* tail, void* next) {
-    Logging(2, head, tail, next, false, 1);
+void TRY_DEQUEUE_ITER_TAIL_COMMIT(void* head, void* tail, void* next, LONG queueSize) {
+    Logging(2, head, tail, next, false, queueSize, 1);
 }
-void TRY_DEQUEUE_ITER_HEAD(void* head, void* tail, void* next) {
-    Logging(2, head, tail, next, false, 2);
+void TRY_DEQUEUE_ITER_HEAD(void* head, void* tail, void* next, LONG queueSize) {
+    Logging(2, head, tail, next, false, queueSize, 2);
 }
-void TRY_DEQUEUE_ITER_HEAD_COMMIT(void* head, void* tail, void* next) {
-    Logging(2, head, tail, next, false, 3);
+void TRY_DEQUEUE_ITER_HEAD_COMMIT(void* head, void* tail, void* next, LONG queueSize) {
+    Logging(2, head, tail, next, false, queueSize, 3);
 }
-void COMMIT_DEQUEUE_ITER(void* head, void* tail, void* next) {
-    Logging(2, head, tail,next,  true);
+void COMMIT_DEQUEUE_ITER(void* head, void* tail, void* next, LONG queueSize) {
+    Logging(2, head, tail,next,  true, queueSize);
 }
 
 
@@ -178,20 +184,21 @@ private:
 
 public:
     struct iterator {
-        Node* current;
+        Node*               m_Current;
+        LockFreeMemPool*    m_Lfmp;
 
-        iterator(Node* head) : current(head) {}
-        bool operator!=(const iterator& other) const {
-            return current != other.current;
-        }
+        iterator(Node* head, LockFreeMemPool* lfmp) : m_Current(head), m_Lfmp(lfmp) {}
+
         bool pop(T& t) {
-            current = (Node*)((UINT_PTR)current & LockFreeQueue::mask);
-            if (current == NULL) {
+            m_Current = (Node*)((UINT_PTR)m_Current & LockFreeQueue::mask);
+            if (m_Current == NULL || m_Current == (Node*)0x0000'FFFF'FFFF'FFFF) {
                 return false;
             }
 
-            t = current->data;
-            current = current->next;
+            t = m_Current->data;
+            Node* newCurrent = m_Current->next;
+            m_Lfmp->Free(m_Current);
+            m_Current = newCurrent;
         }
     };
 
@@ -230,7 +237,7 @@ public:
             Node* originTail = (Node*)((UINT_PTR)tail & mask);
             Node* next = originTail->next;
 
-            TRY_ENQUEUE(m_Head, tail, next);
+            TRY_ENQUEUE(m_Head, tail, next, m_Size);
 
 #if defined(SIMPLE_ENQUEUE)
             if (next == NULL) {
@@ -246,15 +253,14 @@ public:
                 break;
             }
 #endif
-            if (tryCnt++ == 100) {
+            if (tryCnt++ == 10000) {
                 DebugBreak();
                 PrintLog();
             }
-        }
-
-        COMMIT_ENQUEUE(m_Head, (PVOID)managedPtr, 0);
+        }        
 
         InterlockedIncrement(&m_Size);
+        COMMIT_ENQUEUE(m_Head, (PVOID)managedPtr, 0, m_Size);
     }
 
     bool Dequeue(T& t, bool singleReader = false) {
@@ -269,7 +275,7 @@ public:
                 Node* originHead = (Node*)((UINT_PTR)head & mask);
                 Node* next = originHead->next;
 
-                TRY_DEQUEUE(head, m_Tail, next);
+                TRY_DEQUEUE(head, m_Tail, next, m_Size);
 
                 // 아래 조건문에서 m_head == head가 충족한다는 것은 위 head와 next는 동일한 노드에서 읽은 것이 보장된다.
                 // 이미 MSB부터 일부에 증분 비트로 노드를 식별하는 기법이 들어가 있기 때문.
@@ -287,14 +293,14 @@ public:
                             Node* newNext = (Node*)((UINT_PTR)next & mask);
                             newNext = newNext->next;
 
-                            COMMIT_DEQUEUE(next, m_Tail, newNext);
+                            COMMIT_DEQUEUE(next, m_Tail, newNext, m_Size);
 
                             break;
                         }
                     }
                 }
 
-                if (tryCnt++ == 100) {
+                if (tryCnt++ == 10000) {
                     DebugBreak();
                     PrintLog();
                 }
@@ -351,12 +357,12 @@ public:
             originTail = (Node*)((UINT_PTR)tail & mask);
             next = originTail->next;
 
-            TRY_DEQUEUE_ITER_TAIL(m_Head, tail, next);
+            TRY_DEQUEUE_ITER_TAIL(m_Head, tail, next, m_Size);
 
 #if defined(SIMPLE_ENQUEUE)
             if (next == NULL) {
                 if (InterlockedCompareExchangePointer((PVOID*)&originTail->next, (PVOID)0xFFFF'FFFF'FFFF'FFFF, next) == next) {
-                    TRY_DEQUEUE_ITER_TAIL_COMMIT(m_Head, tail, (void*)0xFFFF'FFFF'FFFF'FFFF);
+                    TRY_DEQUEUE_ITER_TAIL_COMMIT(m_Head, tail, (void*)0xFFFF'FFFF'FFFF'FFFF, m_Size);
                     break;
                 }
             }
@@ -370,11 +376,15 @@ public:
         /////////////////////////////////////////
         // 이 시점 이후부턴 추가적인 Enqueue 없음
         /////////////////////////////////////////
-        UINT queueSize = InterlockedExchange(&m_Size, 0);
-        if (queueSize == 0) {
+        LONG queueSize = InterlockedExchange(&m_Size, 0);
+        if (queueSize <= 0) {           // 순간적으로 queueSize는 음수가 될 수 있다(Dequque 시도에 의해) 따라서 부등호 조건식이 필요
+            if (queueSize < 0) {
+                InterlockedAdd(&m_Size, queueSize);
+            }
+
             LFMP.Free(dummy);
             originTail->next = NULL;
-            return iterator(NULL);
+            return iterator(NULL, &this->LFMP);
         }
 
         /////////////////////////////////////////
@@ -387,14 +397,14 @@ public:
             head = m_Head;
             originHead = (Node*)((UINT_PTR)head & mask);
 
-            TRY_DEQUEUE_ITER_HEAD(head, m_Tail, originHead->next);
+            TRY_DEQUEUE_ITER_HEAD(head, m_Tail, originHead->next, m_Size);
 
             if (InterlockedCompareExchangePointer((PVOID*)&m_Head, (PVOID)managedDummyPtr, head) == head) {
                 break;
             }
         }
 
-        TRY_DEQUEUE_ITER_HEAD_COMMIT((PVOID)managedDummyPtr, m_Tail, (void*)0);
+        TRY_DEQUEUE_ITER_HEAD_COMMIT((PVOID)managedDummyPtr, m_Tail, (void*)0, m_Size);
 
         Node* current = originHead->next;
         if (current == NULL) {
@@ -402,7 +412,7 @@ public:
             PrintLog();
         }
 
-        UINT nodeCnt = 0;
+        LONG nodeCnt = 0;
         while ((UINT_PTR)current != 0xFFFF'FFFF'FFFF'FFFF) {
             nodeCnt++;
             Node* originPtr = (Node*)((UINT_PTR)current & mask);
@@ -410,21 +420,31 @@ public:
         }
 
         if (nodeCnt == 0) {
-            LFMP.Free(dummy);
+            m_Head = originTail;
             originTail->next = NULL;
 
-            return iterator(NULL);
+            Sleep(0);
+            Sleep(0);
+            Sleep(0);
+            LFMP.Free(dummy);   // Free 된 직후 다시 할당 받아 인큐될 시 잘못된 디큐잉 우려...?
+
+            return iterator(NULL, &this->LFMP);
         }
         else {
-            COMMIT_DEQUEUE_ITER((PVOID)managedDummyPtr, (PVOID)managedDummyPtr, (void*)NULL);
+            COMMIT_DEQUEUE_ITER((PVOID)managedDummyPtr, (PVOID)managedDummyPtr, (void*)NULL, m_Size);
 
             if (queueSize > nodeCnt) {
                 InterlockedAdd(&m_Size, queueSize - nodeCnt);
             }
-            m_Tail = (Node*)managedDummyPtr;
-            originTail->next = NULL;
 
-            return iterator(originHead->next);
+
+            m_Tail = (Node*)managedDummyPtr;
+            
+            // Enqueue 시도 스레드에서 새로운 더미가 아닌 기존 tail에 새로운 노드를 추가할 수 있음
+            // 따라서 orinTail->next == 0xFFFF'FFFF'FFFF'FFFF 유지
+            //originTail->next = NULL;
+
+            return iterator(originHead->next, &this->LFMP);
         }
     }
 };
