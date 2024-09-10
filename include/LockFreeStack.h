@@ -8,7 +8,11 @@
 #include <limits>
 
 #include "LockFreeMemPool.h"	
-#pragma comment(lib, "LockFree")
+#ifdef _DEBUG
+#pragma comment(lib, "../lib/Debug/LockFree.lib")
+#else
+#pragma comment(lib, "../lib/Release/LockFree.lib")
+#endif
 
 //#define AVOID_ABA_PROBLEM
 #define AVOID_ABA_PROBLEM_IMPROVED

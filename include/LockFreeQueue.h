@@ -7,7 +7,11 @@
 #include <fstream>
 #include <sstream>
 #include "LockFreeMemPool.h"
-#pragma comment(lib, "LockFree")
+#ifdef _DEBUG
+#pragma comment(lib, "../lib/Debug/LockFree.lib")
+#else
+#pragma comment(lib, "../lib/Release/LockFree.lib")
+#endif
 
 using namespace std;
 
