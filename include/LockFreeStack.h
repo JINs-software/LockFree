@@ -6,13 +6,7 @@
 #include <string>
 #include <stdexcept>
 #include <limits>
-
 #include "LockFreeMemPool.h"	
-#ifdef _DEBUG
-#pragma comment(lib, "../lib/Debug/LockFree.lib")
-#else
-#pragma comment(lib, "../lib/Release/LockFree.lib")
-#endif
 
 //#define AVOID_ABA_PROBLEM
 #define AVOID_ABA_PROBLEM_IMPROVED
