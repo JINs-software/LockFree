@@ -7,7 +7,7 @@
 #include <fstream>
 #include <sstream>
 #include "LockFreeMemPool.h"
-#pragma comment(lib, "LockFreeMemoryPool")
+#pragma comment(lib, "LockFree")
 
 using namespace std;
 
@@ -30,16 +30,21 @@ stLog LogVec[USHRT_MAX];
 void PrintLog() {
     // 현재 날짜와 시간을 파일 제목으로 설정
     auto now = chrono::system_clock::now();
-    time_t now_time = chrono::system_clock::to_time_t(now);
-    tm* now_tm = localtime(&now_time);
+    //time_t now_time = chrono::system_clock::to_time_t(now);
+    //tm* now_tm = localtime(&now_time);
+    time_t rawtime;
+    struct tm timeinfo;
+    time(&rawtime);
+    localtime_s(&timeinfo, &rawtime);
 
     ostringstream filename;
-    filename << "Log_" << (now_tm->tm_year + 1900) << "-"
-        << (now_tm->tm_mon + 1) << "-"
-        << now_tm->tm_mday << "_"
-        << now_tm->tm_hour << "-"
-        << now_tm->tm_min << "-"
-        << now_tm->tm_sec << ".txt";
+    filename << "Log_" 
+        << (timeinfo.tm_year + 1900) << "-"
+        << (timeinfo.tm_mon + 1) << "-"
+        << timeinfo.tm_mday << "_"
+        << timeinfo.tm_hour << "-"
+        << timeinfo.tm_min << "-"
+        << timeinfo.tm_sec << ".txt";
 
     ofstream logfile(filename.str());
     if (!logfile.is_open()) {

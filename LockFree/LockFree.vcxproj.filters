@@ -6,5 +6,6 @@
   <ItemGroup>
     <ClInclude Include="..\include\LockFreeMemPool.h" />
     <ClInclude Include="..\include\LockFreeQueue.h" />
+    <ClInclude Include="..\include\LockFreeStack.h" />
   </ItemGroup>
 </Project>

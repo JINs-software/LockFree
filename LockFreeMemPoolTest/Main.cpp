@@ -2,7 +2,7 @@
 #include <process.h>
 #include <iostream>
 
-#pragma comment(lib, "LockFreeMemoryPool")
+#pragma comment(lib, "LockFree")
 
 #define NUM_OF_THREADS	8
 #define NUM_OF_LOOP		1000
@@ -61,7 +61,10 @@ unsigned WINAPI TestJob(void* arg) {
 int main() {
 	size_t testLoopCnt = 0;
 	while (true) {
+
+#if defined(ON_LOG)
 		InitLog();
+#endif
 		HANDLE hThreads[NUM_OF_THREADS];
 		for (int i = 0; i < NUM_OF_THREADS; i++) {
 			hThreads[i] = (HANDLE)_beginthreadex(NULL, 0, TestJob, NULL, 0, NULL);
@@ -70,7 +73,9 @@ int main() {
 		WaitForMultipleObjects(NUM_OF_THREADS, hThreads, TRUE, INFINITE);
 
 		if (errorFlag) {
+#if defined(ON_LOG)
 			LogVectorCheck();
+#endif
 		}
 
 		for (int i = 0; i < NUM_OF_THREADS; i++) {
