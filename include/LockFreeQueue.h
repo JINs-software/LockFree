@@ -11,9 +11,278 @@
 
 using namespace std;
 
-#define SIMPLE_ENQUEUE
 //#define SWAP_CAS_LOCATION
+//#define LOCK_FREE_QUEUE_LOG
+//#define LOCK_FREE_DEQUEUE_ITERATOR    // Incomplete
 
+template<typename T>
+class LockFreeQueue {
+private:
+    struct Node {
+        T data;
+        Node* next;
+    };
+
+private:
+    LockFreeMemPool LFMP;
+
+    Node*   m_Head;        // head node ptr
+    Node*   m_Tail;        // tail node ptr
+    LONG    m_Size;
+
+    short m_Increment;
+    static const unsigned long long mask = 0x0000'FFFF'FFFF'FFFF;
+
+public:
+    struct iterator {
+        Node*               m_Current;
+        LockFreeMemPool*    m_Lfmp;
+
+        iterator(Node* head, LockFreeMemPool* lfmp) : m_Current(head), m_Lfmp(lfmp) {}
+
+        bool pop(T& t) {
+            m_Current = (Node*)((UINT_PTR)m_Current & LockFreeQueue::mask);
+            if (m_Current == NULL || m_Current == (Node*)0x0000'FFFF'FFFF'FFFF) {
+                return false;
+            }
+
+            t = m_Current->data;
+            Node* newCurrent = m_Current->next;
+            m_Lfmp->Free(m_Current);
+            m_Current = newCurrent;
+        }
+    };
+
+public:
+    LockFreeQueue() 
+        : LFMP(sizeof(T), 0), m_Increment(0), m_Size(0)
+    {
+        m_Head = (Node*)LFMP.Alloc();
+        m_Head->next = NULL;
+        m_Tail = m_Head;
+    }
+    inline LONG GetSize() {
+        return m_Size;
+    }
+
+    void Enqueue(T t) {
+        Node* newNode = (Node*)LFMP.Alloc();
+        if (newNode == NULL) {
+            DebugBreak();
+        }
+
+        newNode->data = t;
+#if !defined(SWAP_CAS_LOCATION)
+        newNode->next = (Node*)0xFFFF'FFFF'FFFF'FFFF;
+#else
+        newNode->next = NULL;
+#endif
+
+        UINT_PTR incrementPart = InterlockedIncrement16(&m_Increment);	// 64 = 16
+        incrementPart <<= (64 - 16);
+        UINT_PTR managedPtr = ((UINT_PTR)newNode ^ incrementPart);
+
+        USHORT tryCnt = 0;
+        while (true) {
+            Node* tail = m_Tail;
+            Node* originTail = (Node*)((UINT_PTR)tail & mask);
+            Node* next = originTail->next;
+#if !defined(SWAP_CAS_LOCATION)
+            if (InterlockedCompareExchangePointer((PVOID*)&m_Tail, (PVOID)managedPtr, tail) == tail) {
+                originTail->next = (Node*)managedPtr;
+                break;
+            }
+#else
+            if (next == NULL) {
+                if (InterlockedCompareExchangePointer((PVOID*)&originTail->next, (PVOID)managedPtr, next) == next) {
+                    m_Tail = (Node*)managedPtr;
+                    newNode->next = NULL;
+                    break;
+                }
+            }
+#endif
+#if defined(ASSERT)
+            if (tryCnt++ == 10000) { DebugBreak(); PrintLog(); }
+#endif
+        }        
+        InterlockedIncrement(&m_Size);
+    }
+
+    bool Dequeue(T& t, bool singleReader = false) {
+        if (InterlockedDecrement(&m_Size) < 0) {
+            InterlockedIncrement(&m_Size);
+            return false;
+        }
+        if (!singleReader) {
+            USHORT tryCnt = 0;
+            while (true) {
+                Node* head = m_Head;
+                Node* originHead = (Node*)((UINT_PTR)head & mask);
+                Node* next = originHead->next;
+
+                // "m_head == head" ensures that both 'head' and 'next' were read from the same node
+                // (Because a technique for identifying nodes using incremental bits from the MSB is already in place)
+                if (m_Head == head) {
+                    if (next == NULL || next == (Node*)0xFFFF'FFFF'FFFF'FFFF) {
+                        InterlockedIncrement(&m_Size);
+                        return false;
+                    }
+                    else {
+                        Node* originHeadNext = (Node*)((UINT_PTR)next & mask);
+                        t = originHeadNext->data;
+                        if (InterlockedCompareExchangePointer((PVOID*)&m_Head, next, head) == head) {
+                            LFMP.Free(originHead);
+
+                            Node* newNext = (Node*)((UINT_PTR)next & mask);
+                            newNext = newNext->next;
+                            break;
+                        }
+                    }
+                }
+#if defined(ASSERT)
+                if (tryCnt++ == 10000) { DebugBreak(); PrintLog(); }
+#endif
+            }
+        }
+        else {
+            Node* head = m_Head;
+            Node* originHead = (Node*)((UINT_PTR)head & mask);
+            Node* next = originHead->next;
+
+            if (m_Head != head) {
+#if defined(ASSERT)
+                DebugBreak();       // An abnormal flow, as the queue size was confirmed to be greater than 0
+#endif
+                return false;
+            }
+            else {
+                if (next == NULL || next == (Node*)0xFFFF'FFFF'FFFF'FFFF) {
+#if defined(ASSERT)
+                    DebugBreak();  // An abnormal flow, as the queue size was confirmed to be greater than 0
+#endif
+                    return false;
+                }
+                else {
+                    Node* originHeadNext = (Node*)((UINT_PTR)next & mask);
+                    t = originHeadNext->data;
+                    m_Head = next;
+                    LFMP.Free(originHead);
+                }
+            }
+        }
+
+        return true;
+    }
+
+#if defined(LOCK_FREE_DEQUEUE_ITERATOR)
+    iterator Dequeue() {
+        Node* dummy = (Node*)LFMP.Alloc();
+#if defined(ASSERT)
+        if (dummy == NULL) { DebugBreak(); }
+#endif
+
+#if defined(SWAP_CAS_LOCATION)
+        DebugBreak();
+        // to do: SWAP_CAS_LOCATION 모드 구현
+#else
+        dummy->next = (Node*)NULL;
+#endif
+
+        UINT_PTR incrementPart = InterlockedIncrement16(&m_Increment);	// 64 = 16
+        incrementPart <<= (64 - 16);
+        UINT_PTR managedDummyPtr = ((UINT_PTR)dummy ^ incrementPart);
+
+        Node* tail;
+        Node* originTail;
+        Node* next;
+        while (true) {
+            tail = m_Tail;
+            originTail = (Node*)((UINT_PTR)tail & mask);
+            next = originTail->next;
+
+            TRY_DEQUEUE_ITER_TAIL(m_Head, tail, next, m_Size);
+
+#if defined(SWAP_CAS_LOCATION)
+            DebugBreak();
+            // to do: SWAP_CAS_LOCATION 모드 구현
+#else
+            if (next == NULL) {
+                if (InterlockedCompareExchangePointer((PVOID*)&originTail->next, (PVOID)0xFFFF'FFFF'FFFF'FFFF, next) == next) {
+                    TRY_DEQUEUE_ITER_TAIL_COMMIT(m_Head, tail, (void*)0xFFFF'FFFF'FFFF'FFFF, m_Size);
+                    break;
+                }
+        }
+#endif
+        }
+
+        /////////////////////////////////////////
+        // 이 시점 이후부턴 추가적인 Enqueue 없음
+        /////////////////////////////////////////
+        LONG queueSize = InterlockedExchange(&m_Size, 0);
+        if (queueSize <= 0) {           // 순간적으로 queueSize는 음수가 될 수 있다(Dequque 시도에 의해) 따라서 부등호 조건식이 필요
+            if (queueSize < 0) {
+                InterlockedAdd(&m_Size, queueSize);
+            }
+
+            LFMP.Free(dummy);
+            originTail->next = NULL;
+            return iterator(NULL, &this->LFMP);
+        }
+
+        /////////////////////////////////////////
+        // 이 시점 이후부턴 추가적인 Dequeue 없음
+        // 단, 진행중인 Dequeue는 존재할 수 있음
+        /////////////////////////////////////////
+        Node* head;
+        Node* originHead;
+        while (true) {
+            head = m_Head;
+            originHead = (Node*)((UINT_PTR)head & mask);
+            if (InterlockedCompareExchangePointer((PVOID*)&m_Head, (PVOID)managedDummyPtr, head) == head) {
+                break;
+            }
+        }
+        Node* current = originHead->next;
+#if defined(ASSERT)
+        if (current == NULL) { DebugBreak(); PrintLog(); }
+#endif
+
+        LONG nodeCnt = 0;
+        while ((UINT_PTR)current != 0xFFFF'FFFF'FFFF'FFFF) {
+            nodeCnt++;
+            Node* originPtr = (Node*)((UINT_PTR)current & mask);
+            current = originPtr->next;
+        }
+
+        if (nodeCnt == 0) {
+            m_Head = originTail;
+            originTail->next = NULL;
+
+            Sleep(0);
+            Sleep(0);
+            Sleep(0);
+            LFMP.Free(dummy);   // Free 된 직후 다시 할당 받아 인큐될 시 잘못된 디큐잉 우려...?
+
+            return iterator(NULL, &this->LFMP);
+        }
+        else {
+            if (queueSize > nodeCnt) {
+                InterlockedAdd(&m_Size, queueSize - nodeCnt);
+            }
+            m_Tail = (Node*)managedDummyPtr;
+            
+            // Enqueue 시도 스레드에서 새로운 더미가 아닌 기존 tail에 새로운 노드를 추가할 수 있음
+            // 따라서 orinTail->next == 0xFFFF'FFFF'FFFF'FFFF 유지
+            //originTail->next = NULL;
+
+            return iterator(originHead->next, &this->LFMP);
+        }
+    }
+#endif
+
+};
+
+#if defined(LOCK_FREE_QUEUE_LOG)
 struct stLog {
     BYTE type;      // 0: enqueue, 1: dequeue, 2: dequeueIter
     void* head;
@@ -38,7 +307,7 @@ void PrintLog() {
     localtime_s(&timeinfo, &rawtime);
 
     ostringstream filename;
-    filename << "Log_" 
+    filename << "Log_"
         << (timeinfo.tm_year + 1900) << "-"
         << (timeinfo.tm_mon + 1) << "-"
         << timeinfo.tm_mday << "_"
@@ -57,7 +326,7 @@ void PrintLog() {
         if (memcmp(&LogVec[0], &cmp, sizeof(stLog)) == 0) {
             break;
         }
-        
+
         logfile << "====================================" << endl;
         if (LogVec[i].type == 0) {
             if (!LogVec[i].commited) {
@@ -129,7 +398,7 @@ void PrintLog() {
 void Logging(BYTE type, void* head, void* tail, void* next, bool commited, LONG queueSize, BYTE detail = 0) {
     USHORT idx = InterlockedIncrement16((SHORT*)&LogIndex);
     idx -= 1;
-   
+
     LogVec[idx].type = type;
     LogVec[idx].head = head;
     LogVec[idx].tail = tail;
@@ -143,13 +412,13 @@ void TRY_ENQUEUE(void* head, void* tail, void* next, LONG queueSize) {
     Logging(0, head, tail, next, false, queueSize);
 }
 void COMMIT_ENQUEUE(void* head, void* tail, void* next, LONG queueSize) {
-    Logging(0, head, tail,next,  true, queueSize);
+    Logging(0, head, tail, next, true, queueSize);
 }
 void TRY_DEQUEUE(void* head, void* tail, void* next, LONG queueSize) {
     Logging(1, head, tail, next, false, queueSize);
 }
 void COMMIT_DEQUEUE(void* head, void* tail, void* next, LONG queueSize) {
-    Logging(1, head, tail,next,  true, queueSize);
+    Logging(1, head, tail, next, true, queueSize);
 }
 
 void TRY_DEQUEUE_ITER_TAIL(void* head, void* tail, void* next, LONG queueSize) {
@@ -165,291 +434,6 @@ void TRY_DEQUEUE_ITER_HEAD_COMMIT(void* head, void* tail, void* next, LONG queue
     Logging(2, head, tail, next, false, queueSize, 3);
 }
 void COMMIT_DEQUEUE_ITER(void* head, void* tail, void* next, LONG queueSize) {
-    Logging(2, head, tail,next,  true, queueSize);
+    Logging(2, head, tail, next, true, queueSize);
 }
-
-
-template<typename T>
-class LockFreeQueue {
-private:
-    struct Node {
-        T data;
-        Node* next;
-    };
-
-private:
-    LockFreeMemPool LFMP;
-
-    Node*   m_Head;        // 시작노드를 포인트한다.
-    Node*   m_Tail;        // 마지막노드를 포인트한다.
-    LONG    m_Size;
-
-    short m_Increment;
-    static const unsigned long long mask = 0x0000'FFFF'FFFF'FFFF;
-
-public:
-    struct iterator {
-        Node*               m_Current;
-        LockFreeMemPool*    m_Lfmp;
-
-        iterator(Node* head, LockFreeMemPool* lfmp) : m_Current(head), m_Lfmp(lfmp) {}
-
-        bool pop(T& t) {
-            m_Current = (Node*)((UINT_PTR)m_Current & LockFreeQueue::mask);
-            if (m_Current == NULL || m_Current == (Node*)0x0000'FFFF'FFFF'FFFF) {
-                return false;
-            }
-
-            t = m_Current->data;
-            Node* newCurrent = m_Current->next;
-            m_Lfmp->Free(m_Current);
-            m_Current = newCurrent;
-        }
-    };
-
-public:
-    LockFreeQueue() 
-        : LFMP(sizeof(T), 0), m_Increment(0), m_Size(0)
-    {
-        m_Head = (Node*)LFMP.Alloc();
-        m_Head->next = NULL;
-        m_Tail = m_Head;
-    }
-    inline LONG GetSize() {
-        return m_Size;
-    }
-
-    void Enqueue(T t) {
-        Node* newNode = (Node*)LFMP.Alloc();
-        if (newNode == NULL) {
-            DebugBreak();
-        }
-
-        newNode->data = t;
-#if defined(SWAP_CAS_LOCATION)
-        newNode->next = NULL;
-#else
-        newNode->next = (Node*)0xFFFF'FFFF'FFFF'FFFF;
 #endif
-
-        UINT_PTR incrementPart = InterlockedIncrement16(&m_Increment);	// 64 = 16
-        incrementPart <<= (64 - 16);
-        UINT_PTR managedPtr = ((UINT_PTR)newNode ^ incrementPart);
-
-        USHORT tryCnt = 0;
-        while (true) {
-            Node* tail = m_Tail;
-            Node* originTail = (Node*)((UINT_PTR)tail & mask);
-            Node* next = originTail->next;
-
-            TRY_ENQUEUE(m_Head, tail, next, m_Size);
-
-#if defined(SIMPLE_ENQUEUE)
-            if (next == NULL) {
-                if (InterlockedCompareExchangePointer((PVOID*)&originTail->next, (PVOID)managedPtr, next) == next) {
-                    m_Tail = (Node*)managedPtr;
-                    newNode->next = NULL;
-                    break;
-                }
-            }
-#elif defined(SWAP_CAS_LOCATION)
-            if (InterlockedCompareExchangePointer((PVOID*)&m_Tail, (PVOID)managedPtr, tail) == tail) {
-                originTail->next = (Node*)managedPtr;
-                break;
-            }
-#endif
-            if (tryCnt++ == 10000) {
-                DebugBreak();
-                PrintLog();
-            }
-        }        
-
-        InterlockedIncrement(&m_Size);
-        COMMIT_ENQUEUE(m_Head, (PVOID)managedPtr, 0, m_Size);
-    }
-
-    bool Dequeue(T& t, bool singleReader = false) {
-        if (InterlockedDecrement(&m_Size) < 0) {
-            InterlockedIncrement(&m_Size);
-            return false;
-        }
-        if (!singleReader) {
-            USHORT tryCnt = 0;
-            while (true) {
-                Node* head = m_Head;
-                Node* originHead = (Node*)((UINT_PTR)head & mask);
-                Node* next = originHead->next;
-
-                TRY_DEQUEUE(head, m_Tail, next, m_Size);
-
-                // 아래 조건문에서 m_head == head가 충족한다는 것은 위 head와 next는 동일한 노드에서 읽은 것이 보장된다.
-                // 이미 MSB부터 일부에 증분 비트로 노드를 식별하는 기법이 들어가 있기 때문.
-                if (m_Head == head) {
-                    if (next == NULL || next == (Node*)0xFFFF'FFFF'FFFF'FFFF) {
-                        InterlockedIncrement(&m_Size);
-                        return false;
-                    }
-                    else {
-                        Node* originHeadNext = (Node*)((UINT_PTR)next & mask);
-                        t = originHeadNext->data;
-                        if (InterlockedCompareExchangePointer((PVOID*)&m_Head, next, head) == head) {
-                            LFMP.Free(originHead);
-
-                            Node* newNext = (Node*)((UINT_PTR)next & mask);
-                            newNext = newNext->next;
-
-                            COMMIT_DEQUEUE(next, m_Tail, newNext, m_Size);
-
-                            break;
-                        }
-                    }
-                }
-
-                if (tryCnt++ == 10000) {
-                    DebugBreak();
-                    PrintLog();
-                }
-            }
-        }
-        else {
-            Node* head = m_Head;
-            Node* originHead = (Node*)((UINT_PTR)head & mask);
-            Node* next = originHead->next;
-
-            if (m_Head != head) {
-                DebugBreak();  // 큐 사이즈 > 0을 확인하였기에 예외처리 
-                return false;
-            }
-            else {
-                if (next == NULL || next == (Node*)0xFFFF'FFFF'FFFF'FFFF) {
-                    DebugBreak();  // 큐 사이즈 > 0을 확인하였기에 예외처리 
-                    return false;
-                }
-                else {
-                    Node* originHeadNext = (Node*)((UINT_PTR)next & mask);
-                    t = originHeadNext->data;
-                    m_Head = next;
-                    LFMP.Free(originHead);
-                }
-            }
-        }
-
-        return true;
-    }
-
-    iterator Dequeue() {
-        Node* dummy = (Node*)LFMP.Alloc();
-        if (dummy == NULL) {
-            DebugBreak();
-        }
-
-#if defined(SIMPLE_ENQUEUE)
-        dummy->next = (Node*)NULL;
-#elif defined(SWAP_CAS_LOCATION)
-        DebugBreak();
-        // to do: SWAP_CAS_LOCATION 모드 구현
-#endif
-
-        UINT_PTR incrementPart = InterlockedIncrement16(&m_Increment);	// 64 = 16
-        incrementPart <<= (64 - 16);
-        UINT_PTR managedDummyPtr = ((UINT_PTR)dummy ^ incrementPart);
-
-        Node* tail;
-        Node* originTail;
-        Node* next;
-        while (true) {
-            tail = m_Tail;
-            originTail = (Node*)((UINT_PTR)tail & mask);
-            next = originTail->next;
-
-            TRY_DEQUEUE_ITER_TAIL(m_Head, tail, next, m_Size);
-
-#if defined(SIMPLE_ENQUEUE)
-            if (next == NULL) {
-                if (InterlockedCompareExchangePointer((PVOID*)&originTail->next, (PVOID)0xFFFF'FFFF'FFFF'FFFF, next) == next) {
-                    TRY_DEQUEUE_ITER_TAIL_COMMIT(m_Head, tail, (void*)0xFFFF'FFFF'FFFF'FFFF, m_Size);
-                    break;
-                }
-            }
-#elif defined(SWAP_CAS_LOCATION)
-            DebugBreak();
-            // to do: SWAP_CAS_LOCATION 모드 구현
-            // ... 
-#endif
-        }
-
-        /////////////////////////////////////////
-        // 이 시점 이후부턴 추가적인 Enqueue 없음
-        /////////////////////////////////////////
-        LONG queueSize = InterlockedExchange(&m_Size, 0);
-        if (queueSize <= 0) {           // 순간적으로 queueSize는 음수가 될 수 있다(Dequque 시도에 의해) 따라서 부등호 조건식이 필요
-            if (queueSize < 0) {
-                InterlockedAdd(&m_Size, queueSize);
-            }
-
-            LFMP.Free(dummy);
-            originTail->next = NULL;
-            return iterator(NULL, &this->LFMP);
-        }
-
-        /////////////////////////////////////////
-        // 이 시점 이후부턴 추가적인 Dequeue 없음
-        // 단, 진행중인 Dequeue는 존재할 수 있음
-        /////////////////////////////////////////
-        Node* head;
-        Node* originHead;
-        while (true) {
-            head = m_Head;
-            originHead = (Node*)((UINT_PTR)head & mask);
-
-            TRY_DEQUEUE_ITER_HEAD(head, m_Tail, originHead->next, m_Size);
-
-            if (InterlockedCompareExchangePointer((PVOID*)&m_Head, (PVOID)managedDummyPtr, head) == head) {
-                break;
-            }
-        }
-
-        TRY_DEQUEUE_ITER_HEAD_COMMIT((PVOID)managedDummyPtr, m_Tail, (void*)0, m_Size);
-
-        Node* current = originHead->next;
-        if (current == NULL) {
-            DebugBreak();
-            PrintLog();
-        }
-
-        LONG nodeCnt = 0;
-        while ((UINT_PTR)current != 0xFFFF'FFFF'FFFF'FFFF) {
-            nodeCnt++;
-            Node* originPtr = (Node*)((UINT_PTR)current & mask);
-            current = originPtr->next;
-        }
-
-        if (nodeCnt == 0) {
-            m_Head = originTail;
-            originTail->next = NULL;
-
-            Sleep(0);
-            Sleep(0);
-            Sleep(0);
-            LFMP.Free(dummy);   // Free 된 직후 다시 할당 받아 인큐될 시 잘못된 디큐잉 우려...?
-
-            return iterator(NULL, &this->LFMP);
-        }
-        else {
-            COMMIT_DEQUEUE_ITER((PVOID)managedDummyPtr, (PVOID)managedDummyPtr, (void*)NULL, m_Size);
-
-            if (queueSize > nodeCnt) {
-                InterlockedAdd(&m_Size, queueSize - nodeCnt);
-            }
-
-
-            m_Tail = (Node*)managedDummyPtr;
-            
-            // Enqueue 시도 스레드에서 새로운 더미가 아닌 기존 tail에 새로운 노드를 추가할 수 있음
-            // 따라서 orinTail->next == 0xFFFF'FFFF'FFFF'FFFF 유지
-            //originTail->next = NULL;
-
-            return iterator(originHead->next, &this->LFMP);
-        }
-    }
-};
