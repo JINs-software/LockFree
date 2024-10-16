@@ -33,6 +33,7 @@ private:
     static const unsigned long long mask = 0x0000'FFFF'FFFF'FFFF;
 
 public:
+#if defined(LOCK_FREE_DEQUEUE_ITERATOR)
     struct iterator {
         Node*               m_Current;
         LockFreeMemPool*    m_Lfmp;
@@ -51,6 +52,7 @@ public:
             m_Current = newCurrent;
         }
     };
+#endif
 
 public:
     LockFreeQueue() 
@@ -67,7 +69,9 @@ public:
     void Enqueue(T t) {
         Node* newNode = (Node*)LFMP.Alloc();
         if (newNode == NULL) {
+#if defined(ASSERT)
             DebugBreak();
+#endif
         }
 
         newNode->data = t;
@@ -87,11 +91,6 @@ public:
             Node* originTail = (Node*)((UINT_PTR)tail & mask);
             Node* next = originTail->next;
 #if !defined(SWAP_CAS_LOCATION)
-            if (InterlockedCompareExchangePointer((PVOID*)&m_Tail, (PVOID)managedPtr, tail) == tail) {
-                originTail->next = (Node*)managedPtr;
-                break;
-            }
-#else
             if (next == NULL) {
                 if (InterlockedCompareExchangePointer((PVOID*)&originTail->next, (PVOID)managedPtr, next) == next) {
                     m_Tail = (Node*)managedPtr;
@@ -99,9 +98,11 @@ public:
                     break;
                 }
             }
-#endif
-#if defined(ASSERT)
-            if (tryCnt++ == 10000) { DebugBreak(); PrintLog(); }
+#else
+            if (InterlockedCompareExchangePointer((PVOID*)&m_Tail, (PVOID)managedPtr, tail) == tail) {
+                originTail->next = (Node*)managedPtr;
+                break;
+            }
 #endif
         }        
         InterlockedIncrement(&m_Size);
@@ -113,7 +114,6 @@ public:
             return false;
         }
         if (!singleReader) {
-            USHORT tryCnt = 0;
             while (true) {
                 Node* head = m_Head;
                 Node* originHead = (Node*)((UINT_PTR)head & mask);
@@ -131,16 +131,10 @@ public:
                         t = originHeadNext->data;
                         if (InterlockedCompareExchangePointer((PVOID*)&m_Head, next, head) == head) {
                             LFMP.Free(originHead);
-
-                            Node* newNext = (Node*)((UINT_PTR)next & mask);
-                            newNext = newNext->next;
                             break;
                         }
                     }
                 }
-#if defined(ASSERT)
-                if (tryCnt++ == 10000) { DebugBreak(); PrintLog(); }
-#endif
             }
         }
         else {

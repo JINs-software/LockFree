@@ -2,9 +2,7 @@
 #include <winnt.h>
 #include <iomanip>
 
-/////////////////////////////////////////////////////////////////////////////////////
-// [생성자] LockFreeMemPool::LockFreeMemPool(size_t unitSize, size_t unitCnt)
-/////////////////////////////////////////////////////////////////////////////////////
+/// @details initChunck 호출을 통해 메모리 풀 청크 할당 요청, Free-list front 포인터로 청크 시작 주소 설정
 #if defined(SIMPLE_MEM_POOL)
 LockFreeMemPool::LockFreeMemPool(size_t unitSize, size_t unitCnt)
 	: m_UnitSize(unitSize), m_UnitCnt(unitCnt), m_FreeFront(NULL), m_Increment(0) {
@@ -21,9 +19,7 @@ LockFreeMemPool::LockFreeMemPool(size_t unitSize, size_t unitCnt)
 }
 #endif
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////
-// [소멸자] LockFreeMemPool::~LockFreeMemPool()
-///////////////////////////////////////////////////////////////////////////////////////////////////////
+/// @details 할당된 청크 리소스 반환
 #if defined(SIMPLE_MEM_POOL)
 LockFreeMemPool::~LockFreeMemPool() {
 	// Relies on heap cleanup at application termination
