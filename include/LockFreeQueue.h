@@ -69,9 +69,7 @@ public:
     void Enqueue(T t) {
         Node* newNode = (Node*)LFMP.Alloc();
         if (newNode == NULL) {
-#if defined(ASSERT)
             DebugBreak();
-#endif
         }
 
         newNode->data = t;
